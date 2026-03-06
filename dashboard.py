@@ -68,7 +68,7 @@ body {
     font-family: system-ui, sans-serif;
     background:var(--bg);
     color:var(--text);
-    padding:30px;
+    padding:24px 30px;
     max-width:1400px;
     margin:auto;
 }
@@ -84,6 +84,7 @@ body {
     display:grid;
     grid-template-columns: repeat(3, 1fr);
     gap:20px;
+    margin-bottom:20px;
 }
 
 .card {
@@ -157,58 +158,37 @@ table.device-table td {
 }
 
 /* Light-mode overrides */
-[data-theme="light"] .card {
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-}
-/* Export buttons have inline background:#374151 — soften in light mode */
-[data-theme="light"] button[style] {
-    background:#e2e8f0 !important;
-    color:#1e293b !important;
-}
+[data-theme="light"] .card { box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+[data-theme="light"] button[style] { background:#e2e8f0 !important; color:#1e293b !important; }
 [data-theme="light"] .alert-msg { color:#dc2626; }
 [data-theme="light"] #device-table input[type="text"] {
     background:var(--input-bg) !important;
     border-color:var(--border) !important;
     color:var(--text) !important;
 }
-[data-theme="light"] #device-table button {
-    background:var(--border) !important;
-    color:var(--text) !important;
-}
+[data-theme="light"] #device-table button { background:var(--border) !important; color:var(--text) !important; }
 [data-theme="light"] #device-table p { color:var(--muted); }
 
 .alert-critical { border-left:4px solid #ef4444; }
 .alert-warning  { border-left:4px solid #f59e0b; }
-.alert-ok { border-left:4px solid #22c55e; }
+.alert-ok       { border-left:4px solid #22c55e; }
 
 /* Collapsible cards */
 .card h2, .card h3 {
-    cursor:pointer;
-    user-select:none;
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
+    cursor:pointer; user-select:none;
+    display:flex; justify-content:space-between; align-items:center;
     margin-top:0;
 }
 .card h2 .chevron, .card h3 .chevron {
-    font-size:11px;
-    color:var(--muted);
-    margin-left:10px;
-    flex-shrink:0;
+    font-size:11px; color:var(--muted); margin-left:10px; flex-shrink:0;
 }
 .card.collapsed > *:not(h2):not(h3) { display:none !important; }
 
 .suggestion-item {
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:8px 10px;
-    margin-bottom:8px;
-    border-radius:8px;
-    background:var(--item-bg);
-    border-left:4px solid #6366f1;
-    font-size:13px;
-    gap:10px;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:8px 10px; margin-bottom:8px; border-radius:8px;
+    background:var(--item-bg); border-left:4px solid #6366f1;
+    font-size:13px; gap:10px;
 }
 .suggestion-text { flex:1; }
 .suggestion-actions { display:flex; gap:6px; flex-shrink:0; }
@@ -217,91 +197,85 @@ table.device-table td {
 
 /* Chat */
 .chat-messages {
-    height:280px;
-    overflow-y:auto;
-    display:flex;
-    flex-direction:column;
-    gap:8px;
-    padding:4px 0 8px;
+    height:320px; overflow-y:auto;
+    display:flex; flex-direction:column; gap:8px; padding:4px 0 8px;
 }
 .chat-msg {
-    padding:8px 12px;
-    border-radius:8px;
-    max-width:85%;
-    font-size:13px;
-    white-space:pre-wrap;
-    line-height:1.5;
+    padding:8px 12px; border-radius:8px; max-width:85%;
+    font-size:13px; white-space:pre-wrap; line-height:1.5;
 }
 .chat-user { background:var(--chat-user); color:var(--chat-user-text); align-self:flex-end; }
 .chat-ai   { background:var(--chat-ai); color:var(--text); align-self:flex-start; border-left:3px solid #6366f1; }
 .chat-row  { display:flex; gap:8px; margin-top:10px; }
 .chat-row input {
-    flex:1;
-    background:var(--input-bg);
-    border:1px solid var(--border);
-    color:var(--text);
-    padding:8px 12px;
-    border-radius:8px;
-    font-size:13px;
+    flex:1; background:var(--input-bg); border:1px solid var(--border);
+    color:var(--text); padding:8px 12px; border-radius:8px; font-size:13px;
 }
 .chat-row input:focus { outline:none; border-color:#6366f1; }
 
 /* Theme toggle */
 .theme-toggle-wrap {
-    display:flex;
-    flex-direction:row;
-    align-items:center;
-    gap:6px;
-    margin-left:auto;
+    display:flex; flex-direction:row; align-items:center; gap:6px; margin-left:auto;
 }
 .theme-toggle-wrap .t-icon { font-size:15px; line-height:1; }
-.toggle-switch {
-    position:relative;
-    display:inline-block;
-    width:44px;
-    height:24px;
-    cursor:pointer;
-}
+.toggle-switch { position:relative; display:inline-block; width:44px; height:24px; cursor:pointer; }
 .toggle-switch input { opacity:0; width:0; height:0; position:absolute; }
-.toggle-track {
-    position:absolute;
-    inset:0;
-    background:var(--border);
-    border-radius:12px;
-    transition:background 0.2s;
-}
+.toggle-track { position:absolute; inset:0; background:var(--border); border-radius:12px; transition:background 0.2s; }
 .toggle-track::before {
-    content:'';
-    position:absolute;
-    width:18px; height:18px;
-    left:3px; top:3px;
-    background:#fff;
-    border-radius:50%;
-    transition:transform 0.2s;
-    box-shadow:0 1px 3px rgba(0,0,0,0.3);
+    content:''; position:absolute; width:18px; height:18px; left:3px; top:3px;
+    background:#fff; border-radius:50%; transition:transform 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.3);
 }
 .toggle-switch input:checked + .toggle-track { background:#6366f1; }
 .toggle-switch input:checked + .toggle-track::before { transform:translateX(20px); }
 
 /* Button bar */
-.btn-bar {
-    display:flex;
-    flex-wrap:wrap;
-    gap:8px;
-    align-items:center;
-    margin-bottom:14px;
-}
+.btn-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
 .btn-bar a, .btn-bar button { margin:0; }
+
+/* Status bar */
+.status-bar { font-size:13px; display:flex; flex-wrap:wrap; gap:16px; color:var(--muted); margin-bottom:18px; }
+
+/* Tab strip */
+.tabs {
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap:4px;
+    background:var(--card);
+    border-radius:12px;
+    padding:4px;
+    margin-bottom:24px;
+}
+.tab-btn {
+    background:transparent; border:none; color:var(--muted);
+    padding:10px 6px; border-radius:8px; cursor:pointer;
+    font-size:13px; font-weight:500; margin:0;
+    display:flex; align-items:center; justify-content:center; gap:5px;
+    transition:background 0.15s, color 0.15s;
+}
+.tab-btn.active { background:#6366f1; color:#fff; }
+.tab-btn:hover:not(.active) { background:var(--item-bg); color:var(--text); }
+.tab-badge {
+    background:#ef4444; color:#fff;
+    border-radius:10px; font-size:10px; padding:1px 5px; line-height:1.4;
+}
+.tab-btn.active .tab-badge { background:rgba(255,255,255,0.3); }
+.tab-panel { display:none; }
+.tab-panel.active { display:block; }
 
 /* Responsive */
 @media (max-width:640px) {
-    body { padding:14px; }
+    body { padding:12px; }
     h1 { font-size:1.2rem; }
     .grid { grid-template-columns:1fr; }
     .charts { grid-template-columns:1fr; }
     .suggestion-item { flex-direction:column; align-items:flex-start; }
     .suggestion-actions { width:100%; justify-content:flex-end; }
-    .chat-messages { height:200px; }
+    .chat-messages { height:240px; }
+}
+/* On very small screens show only emoji in tabs */
+@media (max-width:400px) {
+    .tab-label { display:none; }
+    .tab-btn { font-size:18px; }
 }
 </style>
 </head>
@@ -326,11 +300,130 @@ table.device-table td {
   </div>
 </div>
 
-<div style="margin:0 0 20px;font-size:13px;display:flex;flex-wrap:wrap;gap:16px;color:var(--muted);">
+<div class="status-bar">
   <span>Last scan: <strong style="color:var(--text);">{{last_scan_ago}}</strong></span>
   <span>Next scan: <strong style="color:var(--text);" id="next-countdown">—</strong></span>
 </div>
+
+<div class="tabs" id="main-tabs">
+  <button class="tab-btn" data-tab="overview">
+    🚨 <span class="tab-label">Overview</span>
+    {% if active_alerts %}<span class="tab-badge">{{active_alerts|length}}</span>{% endif %}
+  </button>
+  <button class="tab-btn" data-tab="summary">
+    🧠 <span class="tab-label">Summary</span>
+  </button>
+  <button class="tab-btn" data-tab="devices">
+    🖥 <span class="tab-label">Devices</span>
+  </button>
+  <button class="tab-btn" data-tab="trends">
+    📈 <span class="tab-label">Trends</span>
+  </button>
+</div>
+
+<!-- TAB: Overview -->
+<div class="tab-panel" id="tab-overview">
+
+  <div class="grid">
+    <div class="card">
+      <h2>🚨 Active Alerts</h2>
+      <div class="alert-box">
+      {% if active_alerts %}
+          {% for level, title, message, created, fire_count in active_alerts %}
+            <div class="alert-item alert-{{level}}">
+                <div class="alert-title">{{title}}{% if fire_count >= 3 %} <span style="font-size:10px;background:#ef4444;color:white;padding:2px 6px;border-radius:4px;margin-left:6px;">ESCALATED</span>{% endif %}</div>
+                <div class="alert-msg">{{message}}</div>
+            </div>
+          {% endfor %}
+      {% else %}
+          <p style="color:#4ade80;">No active alerts 🎉</p>
+      {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🟢 Recently Resolved (7 days)</h2>
+      <div class="alert-box">
+      {% if recent_alerts %}
+          {% for level, title, message, created in recent_alerts %}
+            <div class="alert-item alert-ok">
+                <div class="alert-title">{{title}}</div>
+                <div class="alert-time">{{created}}</div>
+            </div>
+          {% endfor %}
+      {% else %}
+          <p>No recently resolved alerts</p>
+      {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if pending_actions %}
+  <div class="card" style="border:1px solid #6366f1;">
+    <h2>🤖 AI Suggestions <span style="font-size:13px;color:var(--muted);font-weight:400;">— approve or reject each action</span></h2>
+    <div class="alert-box">
+      {% for action_id, action_type, display_text, created_at in pending_actions %}
+        <div class="suggestion-item">
+          <div class="suggestion-text">{{display_text}}</div>
+          <div class="suggestion-actions">
+            <form method="POST" action="/actions/{{action_id}}/approve" style="display:inline;">
+              <button class="btn-approve" type="submit">Approve</button>
+            </form>
+            <form method="POST" action="/actions/{{action_id}}/reject" style="display:inline;">
+              <button class="btn-reject" type="submit">Reject</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+<!-- TAB: Summary -->
+<div class="tab-panel" id="tab-summary">
+  <div class="grid">
+    <div class="card">
+      <h2>📊 Latest Summary</h2>
+      <pre>{{summary}}</pre>
+    </div>
+    <div class="card">
+      <h2>🧠 AI Analysis</h2>
+      <pre>{{analysis}}</pre>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: Devices -->
+<div class="tab-panel" id="tab-devices">
+  <div class="card">
+    <h2>🖥 Device Inventory</h2>
+    <div id="device-table" style="overflow-x:auto;">Loading...</div>
+  </div>
+</div>
+
+<!-- TAB: Trends -->
+<div class="tab-panel" id="tab-trends">
+  <div class="charts">
+    <div class="card"><h3>📈 Bandwidth</h3><canvas id="bandwidthChart"></canvas></div>
+    <div class="card"><h3>🖥 Devices</h3><canvas id="deviceChart"></canvas></div>
+    <div class="card"><h3>🔁 Duplicate ARP</h3><canvas id="arpChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>💬 Ask the AI</h2>
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-msg chat-ai">Hi! Ask me anything about your network — devices, alerts, trends, anything in the current data.</div>
+    </div>
+    <div class="chat-row">
+      <input type="text" id="chat-input" placeholder="e.g. Are there any unfamiliar devices?" />
+      <button id="chat-send">Send</button>
+    </div>
+  </div>
+</div>
+
 <script>
+// Countdown timer
 (function(){
   const next = new Date('{{next_scan_iso}}');
   function tick(){
@@ -345,99 +438,8 @@ table.device-table td {
 })();
 </script>
 
-<!-- 🚨 ALERT PANELS -->
-<div class="grid">
-
-  <div class="card">
-    <h2>🚨 Active Alerts</h2>
-    <div class="alert-box">
-    {% if active_alerts %}
-        {% for level, title, message, created, fire_count in active_alerts %}
-          <div class="alert-item alert-{{level}}">
-              <div class="alert-title">{{title}}{% if fire_count >= 3 %} <span style="font-size:10px;background:#ef4444;color:white;padding:2px 6px;border-radius:4px;margin-left:6px;">ESCALATED</span>{% endif %}</div>
-              <div class="alert-msg">{{message}}</div>
-          </div>
-        {% endfor %}
-    {% else %}
-        <p style="color:#4ade80;">No active alerts 🎉</p>
-    {% endif %}
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>🟢 Recently Resolved (7 days)</h2>
-    <div class="alert-box">
-    {% if recent_alerts %}
-        {% for level, title, message, created in recent_alerts %}
-          <div class="alert-item alert-ok">
-              <div class="alert-title">{{title}}</div>
-              <div class="alert-time">{{created}}</div>
-          </div>
-        {% endfor %}
-    {% else %}
-        <p>No recently resolved alerts</p>
-    {% endif %}
-    </div>
-  </div>
-
-</div>
-
-{% if pending_actions %}
-<div class="card" style="margin-bottom:20px;border:1px solid #6366f1;">
-  <h2>🤖 AI Suggestions <span style="font-size:13px;color:var(--muted);font-weight:400;">— approve or reject each action</span></h2>
-  <div class="alert-box">
-    {% for action_id, action_type, display_text, created_at in pending_actions %}
-      <div class="suggestion-item">
-        <div class="suggestion-text">{{display_text}}</div>
-        <div class="suggestion-actions">
-          <form method="POST" action="/actions/{{action_id}}/approve" style="display:inline;">
-            <button class="btn-approve" type="submit">Approve</button>
-          </form>
-          <form method="POST" action="/actions/{{action_id}}/reject" style="display:inline;">
-            <button class="btn-reject" type="submit">Reject</button>
-          </form>
-        </div>
-      </div>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
-<div class="grid">
-  <div class="card">
-    <h2>📊 Latest Summary</h2>
-    <pre>{{summary}}</pre>
-  </div>
-
-  <div class="card">
-    <h2>🧠 AI Analysis</h2>
-    <pre>{{analysis}}</pre>
-  </div>
-</div>
-
-<div class="card" style="margin-bottom:20px;">
-  <h2>💬 Ask the AI</h2>
-  <div class="chat-messages" id="chat-messages">
-    <div class="chat-msg chat-ai">Hi! Ask me anything about your network — devices, alerts, trends, anything in the current data.</div>
-  </div>
-  <div class="chat-row">
-    <input type="text" id="chat-input" placeholder="e.g. Are there any unfamiliar devices?" />
-    <button id="chat-send">Send</button>
-  </div>
-</div>
-
-<div class="card" style="margin-bottom:20px;">
-  <h2>Device Inventory</h2>
-  <div id="device-table" style="overflow-x:auto;">Loading...</div>
-</div>
-
-<div class="charts">
-  <div class="card"><h3>📈 Bandwidth</h3><canvas id="bandwidthChart"></canvas></div>
-  <div class="card"><h3>🖥 Devices</h3><canvas id="deviceChart"></canvas></div>
-  <div class="card"><h3>🔁 Duplicate ARP</h3><canvas id="arpChart"></canvas></div>
-</div>
-
 <script>
+// Device table
 Promise.all([fetch('/devices').then(r => r.json()), fetch('/connections').then(r => r.json())])
 .then(([devData, connData]) => {
     const el = document.getElementById('device-table');
@@ -467,38 +469,39 @@ Promise.all([fetch('/devices').then(r => r.json()), fetch('/connections').then(r
     html += '</tbody></table>';
     el.innerHTML = html;
 });
+</script>
 
+<script>
+// Charts — store instances so we can resize when the tab becomes visible
+var _charts = [];
 fetch('/metrics')
 .then(res => res.json())
 .then(data => {
-
-const opts = {
-    responsive: true,
-    maintainAspectRatio: false,
-    scales: { y: { beginAtZero: true } }
-};
-
-new Chart(document.getElementById('bandwidthChart'), {
-    type:'line',
-    data:{ labels:data.timestamps, datasets:[{ label:'Bandwidth', data:data.bandwidth, borderColor:'cyan', tension:0.2 }]},
-    options:opts
-});
-
-new Chart(document.getElementById('deviceChart'), {
-    type:'line',
-    data:{ labels:data.timestamps, datasets:[{ label:'Devices', data:data.devices, borderColor:'orange', tension:0.2 }]},
-    options:opts
-});
-
-new Chart(document.getElementById('arpChart'), {
-    type:'line',
-    data:{ labels:data.timestamps, datasets:[{ label:'Duplicate ARP', data:data.dup_arp, borderColor:'red', tension:0.2 }]},
-    options:opts
-});
+    const opts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true } }
+    };
+    _charts.push(new Chart(document.getElementById('bandwidthChart'), {
+        type:'line',
+        data:{ labels:data.timestamps, datasets:[{ label:'Bandwidth', data:data.bandwidth, borderColor:'cyan', tension:0.2 }]},
+        options:opts
+    }));
+    _charts.push(new Chart(document.getElementById('deviceChart'), {
+        type:'line',
+        data:{ labels:data.timestamps, datasets:[{ label:'Devices', data:data.devices, borderColor:'orange', tension:0.2 }]},
+        options:opts
+    }));
+    _charts.push(new Chart(document.getElementById('arpChart'), {
+        type:'line',
+        data:{ labels:data.timestamps, datasets:[{ label:'Duplicate ARP', data:data.dup_arp, borderColor:'red', tension:0.2 }]},
+        options:opts
+    }));
 });
 </script>
 
 <script>
+// Chat
 (function(){
   var box = document.getElementById('chat-messages');
   var input = document.getElementById('chat-input');
@@ -519,8 +522,7 @@ new Chart(document.getElementById('arpChart'), {
     input.value = '';
     addMsg(msg, 'user');
     var thinking = addMsg('Thinking…', 'ai');
-    btn.disabled = true;
-    input.disabled = true;
+    btn.disabled = true; input.disabled = true;
     try {
       var res = await fetch('/chat', {
         method: 'POST',
@@ -532,9 +534,7 @@ new Chart(document.getElementById('arpChart'), {
     } catch(e) {
       thinking.textContent = 'Could not reach AI.';
     }
-    btn.disabled = false;
-    input.disabled = false;
-    input.focus();
+    btn.disabled = false; input.disabled = false; input.focus();
   }
 
   btn.addEventListener('click', send);
@@ -543,6 +543,7 @@ new Chart(document.getElementById('arpChart'), {
 </script>
 
 <script>
+// Theme toggle
 (function(){
   var cb = document.getElementById('theme-checkbox');
   function applyTheme(t){
@@ -558,11 +559,35 @@ new Chart(document.getElementById('arpChart'), {
 </script>
 
 <script>
+// Tab switching
+(function(){
+  function showTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(function(b){
+      b.classList.toggle('active', b.dataset.tab === name);
+    });
+    document.querySelectorAll('.tab-panel').forEach(function(p){
+      p.classList.toggle('active', p.id === 'tab-' + name);
+    });
+    localStorage.setItem('active-tab', name);
+    // Charts need a resize after becoming visible
+    if (name === 'trends' && typeof _charts !== 'undefined') {
+      setTimeout(function(){ _charts.forEach(function(c){ c.resize(); }); }, 10);
+    }
+  }
+  document.querySelectorAll('.tab-btn').forEach(function(b){
+    b.addEventListener('click', function(){ showTab(b.dataset.tab); });
+  });
+  showTab(localStorage.getItem('active-tab') || 'overview');
+})();
+</script>
+
+<script>
+// Collapsible cards
 (function(){
   document.querySelectorAll('.card').forEach(function(card){
     var heading = card.querySelector('h2, h3');
     if (!heading) return;
-    var key = 'collapse:' + heading.textContent.trim().replace(/[\s]+/g,' ').substring(0, 40);
+    var key = 'collapse:' + heading.textContent.trim().replace(/[\\s]+/g,' ').substring(0, 40);
     var chevron = document.createElement('span');
     chevron.className = 'chevron';
     heading.appendChild(chevron);
