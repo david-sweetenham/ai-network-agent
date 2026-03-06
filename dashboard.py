@@ -173,6 +173,24 @@ table.device-table td {
 .alert-warning  { border-left:4px solid #f59e0b; }
 .alert-ok       { border-left:4px solid #22c55e; }
 
+/* Alert type badges */
+.alert-tag {
+    display:inline-block; font-size:10px; padding:1px 7px;
+    border-radius:10px; margin-left:7px; vertical-align:middle; font-weight:500;
+}
+/* Clickable alert rows (new device alerts) */
+.alert-clickable { cursor:pointer; }
+.alert-clickable:hover { filter:brightness(1.2); }
+
+/* Chat suggestion chips */
+.chat-suggestions { display:flex; flex-wrap:wrap; gap:6px; padding:6px 12px 4px; }
+.chat-suggestion {
+    background:var(--item-bg); border:1px solid var(--border); color:var(--muted);
+    font-size:11px; padding:4px 10px; border-radius:12px; cursor:pointer; margin:0;
+    transition:border-color 0.15s, color 0.15s;
+}
+.chat-suggestion:hover { border-color:#6366f1; color:#6366f1; }
+
 /* Collapsible cards */
 .card h2, .card h3 {
     cursor:pointer; user-select:none;
@@ -212,6 +230,38 @@ table.device-table td {
     color:var(--text); padding:8px 12px; border-radius:8px; font-size:13px;
 }
 .chat-row input:focus { outline:none; border-color:#6366f1; }
+
+/* Floating chat FAB + panel */
+#chat-fab {
+    position:fixed; bottom:24px; right:24px;
+    width:52px; height:52px; border-radius:50%;
+    background:#6366f1; color:white; font-size:22px;
+    border:none; cursor:pointer; margin:0;
+    box-shadow:0 4px 16px rgba(0,0,0,0.4);
+    z-index:1000;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform 0.15s;
+}
+#chat-fab:hover { transform:scale(1.08); }
+#chat-panel {
+    position:fixed; bottom:88px; right:24px;
+    width:360px; max-width:calc(100vw - 48px);
+    background:var(--card); border-radius:14px;
+    box-shadow:0 8px 32px rgba(0,0,0,0.4);
+    z-index:999; display:none; flex-direction:column;
+    overflow:hidden; border:1px solid var(--border);
+}
+#chat-panel.open { display:flex; }
+#chat-panel-header {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:12px 14px; background:#6366f1; color:white; font-weight:600;
+}
+#chat-close {
+    background:transparent; border:none; color:white;
+    font-size:16px; cursor:pointer; margin:0; padding:2px 6px; line-height:1;
+}
+#chat-panel .chat-messages { height:260px; padding:8px 12px; }
+#chat-panel .chat-row { padding:0 12px 12px; }
 
 /* Theme toggle */
 .theme-toggle-wrap {
@@ -330,8 +380,21 @@ table.device-table td {
       <div class="alert-box">
       {% if active_alerts %}
           {% for level, title, message, created, fire_count in active_alerts %}
+            {% if title.startswith('New device:') %}
+            <div class="alert-item alert-{{level}} alert-clickable" data-mac="{{ title[12:] }}" title="Click for device details">
+            {% else %}
             <div class="alert-item alert-{{level}}">
-                <div class="alert-title">{{title}}{% if fire_count >= 3 %} <span style="font-size:10px;background:#ef4444;color:white;padding:2px 6px;border-radius:4px;margin-left:6px;">ESCALATED</span>{% endif %}</div>
+            {% endif %}
+                <div class="alert-title">
+                  {{title}}
+                  {% if title.startswith('New device:') %}<span class="alert-tag" style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b55;">New Device</span>
+                  {% elif 'packet loss' in title.lower() %}<span class="alert-tag" style="background:#f9731622;color:#f97316;border:1px solid #f9731655;">Packet Loss</span>
+                  {% elif 'unreachable' in title.lower() %}<span class="alert-tag" style="background:#ef444422;color:#ef4444;border:1px solid #ef444455;">Unreachable</span>
+                  {% elif 'duplicate arp' in title.lower() or 'dup arp' in title.lower() %}<span class="alert-tag" style="background:#a855f722;color:#a855f7;border:1px solid #a855f755;">Duplicate ARP</span>
+                  {% elif 'latency' in title.lower() %}<span class="alert-tag" style="background:#3b82f622;color:#3b82f6;border:1px solid #3b82f655;">High Latency</span>
+                  {% endif %}
+                  {% if fire_count >= 3 %}<span style="font-size:10px;background:#ef4444;color:white;padding:2px 6px;border-radius:4px;margin-left:6px;">ESCALATED</span>{% endif %}
+                </div>
                 <div class="alert-msg">{{message}}</div>
             </div>
           {% endfor %}
@@ -409,16 +472,6 @@ table.device-table td {
     <div class="card"><h3>📈 Bandwidth</h3><canvas id="bandwidthChart"></canvas></div>
     <div class="card"><h3>🖥 Devices</h3><canvas id="deviceChart"></canvas></div>
     <div class="card"><h3>🔁 Duplicate ARP</h3><canvas id="arpChart"></canvas></div>
-  </div>
-  <div class="card">
-    <h2>💬 Ask the AI</h2>
-    <div class="chat-messages" id="chat-messages">
-      <div class="chat-msg chat-ai">Hi! Ask me anything about your network — devices, alerts, trends, anything in the current data.</div>
-    </div>
-    <div class="chat-row">
-      <input type="text" id="chat-input" placeholder="e.g. Are there any unfamiliar devices?" />
-      <button id="chat-send">Send</button>
-    </div>
   </div>
 </div>
 
@@ -539,6 +592,15 @@ fetch('/metrics')
 
   btn.addEventListener('click', send);
   input.addEventListener('keydown', function(e){ if(e.key === 'Enter') send(); });
+
+  // Suggestion chips: fill input and send; hide chips afterwards
+  document.querySelectorAll('.chat-suggestion').forEach(function(chip){
+    chip.addEventListener('click', function(){
+      input.value = chip.textContent;
+      document.getElementById('chat-suggestions').style.display = 'none';
+      send();
+    });
+  });
 })();
 </script>
 
@@ -599,6 +661,78 @@ fetch('/metrics')
       localStorage.setItem(key, card.classList.contains('collapsed') ? '1' : '0');
       update();
     });
+  });
+})();
+</script>
+
+<!-- Device detail modal -->
+<div id="device-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:2000; align-items:center; justify-content:center;">
+  <div style="background:var(--card); border-radius:14px; padding:24px; max-width:400px; width:90%; position:relative;">
+    <button id="modal-close" style="position:absolute;top:12px;right:14px;background:transparent;border:none;color:var(--muted);font-size:20px;cursor:pointer;margin:0;line-height:1;">✕</button>
+    <h3 id="modal-title" style="margin-top:0; margin-bottom:14px;">Device Details</h3>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Floating chat -->
+<button id="chat-fab" title="Ask the AI">💬</button>
+<div id="chat-panel">
+  <div id="chat-panel-header">
+    <span>💬 Ask the AI</span>
+    <button id="chat-close" title="Close">✕</button>
+  </div>
+  <div class="chat-messages" id="chat-messages">
+    <div class="chat-msg chat-ai">Hi! Ask me anything about your network — devices, alerts, trends, anything in the current data.</div>
+  </div>
+  <div class="chat-suggestions" id="chat-suggestions">
+    <button class="chat-suggestion">Any unfamiliar devices?</button>
+    <button class="chat-suggestion">Any network problems?</button>
+    <button class="chat-suggestion">Bandwidth spikes?</button>
+    <button class="chat-suggestion">New devices today?</button>
+  </div>
+  <div class="chat-row">
+    <input type="text" id="chat-input" placeholder="Ask about your network…" />
+    <button id="chat-send">Send</button>
+  </div>
+</div>
+
+<script>
+// Floating chat toggle
+(function(){
+  var fab = document.getElementById('chat-fab');
+  var panel = document.getElementById('chat-panel');
+  fab.addEventListener('click', function(){ panel.classList.toggle('open'); });
+  document.getElementById('chat-close').addEventListener('click', function(){ panel.classList.remove('open'); });
+})();
+
+// Device detail modal
+(function(){
+  function openModal(mac) {
+    fetch('/devices/' + encodeURIComponent(mac))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        document.getElementById('modal-title').textContent = d.label || mac;
+        document.getElementById('modal-body').innerHTML =
+          '<table style="width:100%;font-size:13px;border-collapse:collapse;">' +
+          '<tr><td style="padding:6px 0;color:var(--muted);width:90px;">MAC</td><td style="font-family:monospace;">' + d.mac + '</td></tr>' +
+          '<tr><td style="padding:6px 0;color:var(--muted);">IP</td><td style="font-family:monospace;">' + d.ip + '</td></tr>' +
+          '<tr><td style="padding:6px 0;color:var(--muted);">Label</td><td>' + (d.label || '<em style="color:var(--muted)">Unlabelled</em>') + '</td></tr>' +
+          '<tr><td style="padding:6px 0;color:var(--muted);">First seen</td><td>' + d.first_seen + '</td></tr>' +
+          '<tr><td style="padding:6px 0;color:var(--muted);">Last seen</td><td>' + d.last_seen + '</td></tr>' +
+          '</table>' +
+          '<p style="margin-top:14px;font-size:12px;color:var(--muted);">Go to the Devices tab to add a label for this device.</p>';
+        document.getElementById('device-modal').style.display = 'flex';
+      });
+  }
+  document.addEventListener('click', function(e){
+    var item = e.target.closest('.alert-clickable');
+    if (item) openModal(item.dataset.mac);
+  });
+  document.getElementById('modal-close').addEventListener('click', function(){
+    document.getElementById('device-modal').style.display = 'none';
+  });
+  document.getElementById('device-modal').addEventListener('click', function(e){
+    if (e.target === this) this.style.display = 'none';
   });
 })();
 </script>
@@ -747,6 +881,17 @@ def devices_endpoint():
             for r in rows
         ]
     }
+
+
+@app.route("/devices/<mac>")
+@require_auth
+def device_detail(mac):
+    # Returns a single device's details as JSON for the alert click-through modal.
+    rows = network_summary.load_devices()
+    for r in rows:
+        if r[0].lower() == mac.lower():
+            return {"mac": r[0], "ip": r[1], "first_seen": r[2], "last_seen": r[3], "label": r[4] or ""}
+    return {"error": "Not found"}, 404
 
 
 @app.route("/connections")
