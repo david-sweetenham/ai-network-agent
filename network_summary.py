@@ -446,9 +446,12 @@ def collect_summary():
     arp_raw = subprocess.getoutput("arp-scan --localnet")
     conn_raw = subprocess.getoutput("ss -tun | tail -n +2")
 
-    device_count = len([l for l in arp_raw.split("\n") if "192.168" in l])
+    # Count only lines matching the arp-scan data format (IP + TAB + MAC) to avoid
+    # accidentally counting error messages or header/footer lines that contain "192.168".
+    device_count = len([l for l in arp_raw.split("\n") if re.match(r'192\.168\.\d+\.\d+\t', l)])
     dup_count = arp_raw.count("DUP")
-    connection_count = len(conn_raw.split("\n"))
+    # Filter out blank lines so an empty ss output doesn't count as 1 connection.
+    connection_count = len([l for l in conn_raw.split("\n") if l.strip()])
 
     # Parse bandwidth from vnstat — units vary depending on usage level (GiB, MiB, KiB).
     # The original code only matched "GiB" lines, silently returning 0.0 on low-traffic days.
