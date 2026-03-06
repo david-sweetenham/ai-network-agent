@@ -593,13 +593,13 @@ fetch('/metrics')
   btn.addEventListener('click', send);
   input.addEventListener('keydown', function(e){ if(e.key === 'Enter') send(); });
 
-  // Suggestion chips: fill input and send; hide chips afterwards
-  document.querySelectorAll('.chat-suggestion').forEach(function(chip){
-    chip.addEventListener('click', function(){
-      input.value = chip.textContent;
-      document.getElementById('chat-suggestions').style.display = 'none';
-      send();
-    });
+  // Suggestion chips use event delegation because the floating chat HTML is
+  // rendered after this script block, so querySelectorAll would return empty.
+  document.addEventListener('click', function(e){
+    if (!e.target.classList.contains('chat-suggestion')) return;
+    input.value = e.target.textContent.trim();
+    document.getElementById('chat-suggestions').style.display = 'none';
+    send();
   });
 })();
 </script>
