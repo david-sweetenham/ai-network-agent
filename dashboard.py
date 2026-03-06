@@ -846,4 +846,4 @@ def export_alerts():
 # by another module (e.g. tests, or a future WSGI entry point).
 # debug=True enables auto-reload on code changes and shows full tracebacks in the browser.
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", debug=True)
