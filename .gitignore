@@ -1,0 +1,8 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+
+# Databases (runtime data, not source)
+*.db
