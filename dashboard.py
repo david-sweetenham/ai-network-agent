@@ -3,7 +3,7 @@ import network_summary
 import sqlite3
 import csv
 import io
-from alerts import Alert, AlertStorage, AlertEngine
+from alerts import AlertStorage
 from datetime import datetime
 
 app = Flask(__name__)
@@ -663,35 +663,8 @@ def run_scan():
     network_summary.save_summary(today_summary, latest_analysis)
     network_summary.save_pending_actions(suggestions)
 
-    # Upsert device inventory and fire a warning + notification for any new MAC.
     new_macs = network_summary.upsert_devices(devices)
-    for mac in new_macs:
-        alert = Alert(
-            level="warning",
-            title=f"New device: {mac}",
-            message=f"Unknown device joined the network (MAC: {mac})",
-            timestamp=datetime.utcnow()
-        )
-        if not alert_storage.get_active_by_title(alert.title):
-            alert_storage.save(alert)
-            network_summary._send_desktop_notification(f"New device: {mac}", "Unknown device joined the network")
-
-    # Run alert checks with escalation and desktop notifications.
-    metric_adapter = network_summary.MetricAdapter()
-    alert_engine = AlertEngine(metric_adapter)
-    for alert in alert_engine.run_checks():
-        existing = alert_storage.get_active_by_title(alert.title)
-        if alert.level in ["critical", "warning"]:
-            if not existing:
-                alert_storage.save(alert)
-                if alert.level == "critical":
-                    network_summary._send_desktop_notification(alert.title, alert.message)
-            else:
-                escalated = alert_storage.increment_fire_count(alert.title)
-                if escalated:
-                    network_summary._send_desktop_notification(alert.title, f"Escalated to critical: {alert.message}")
-        elif alert.level == "info" and existing:
-            alert_storage.resolve_by_title(alert.title)
+    network_summary.process_scan_alerts(new_macs, alert_storage)
 
     return redirect(url_for("home"))
 

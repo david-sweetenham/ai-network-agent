@@ -626,6 +626,51 @@ USER QUESTION: {message}
 
 
 # -----------------------------
+# Shared alert processing
+# -----------------------------
+
+def process_scan_alerts(new_macs, alert_storage, verbose=False):
+    # Fires new-device alerts and runs threshold checks after every scan.
+    # Extracted here so both main() and the dashboard /run route use identical logic
+    # rather than maintaining two copies that can silently drift apart.
+    # verbose=True prints status lines to stdout (CLI scan path only).
+    for mac in new_macs:
+        alert = Alert(
+            level="warning",
+            title=f"New device: {mac}",
+            message=f"Unknown device joined the network (MAC: {mac})",
+            timestamp=datetime.utcnow()
+        )
+        if not alert_storage.get_active_by_title(alert.title):
+            alert_storage.save(alert)
+            _send_desktop_notification(f"New device: {mac}", "Unknown device joined the network")
+            if verbose:
+                print(f"NEW DEVICE: {mac}")
+
+    metric_adapter = MetricAdapter()
+    alert_engine = AlertEngine(metric_adapter)
+    for alert in alert_engine.run_checks():
+        existing = alert_storage.get_active_by_title(alert.title)
+        if alert.level in ["critical", "warning"]:
+            if not existing:
+                alert_storage.save(alert)
+                if alert.level == "critical":
+                    _send_desktop_notification(alert.title, alert.message)
+                if verbose:
+                    print(f"NEW ALERT: {alert.title}")
+            else:
+                escalated = alert_storage.increment_fire_count(alert.title)
+                if escalated:
+                    _send_desktop_notification(alert.title, f"Escalated to critical: {alert.message}")
+                    if verbose:
+                        print(f"ESCALATED: {alert.title}")
+        elif alert.level == "info" and existing:
+            alert_storage.resolve_by_title(alert.title)
+            if verbose:
+                print(f"RESOLVED: {alert.title}")
+
+
+# -----------------------------
 # MAIN
 # -----------------------------
 
@@ -640,8 +685,6 @@ def main():
     # Note: the AI analysis step is omitted here — it only runs via the dashboard /run route.
     init_db()
 
-    metric_adapter = MetricAdapter()
-    alert_engine = AlertEngine(metric_adapter)
     alert_storage = AlertStorage()
 
     summary, device_count, dup_arp, connections, bandwidth, devices = collect_summary()
@@ -658,45 +701,8 @@ def main():
     save_summary(summary, analysis)
     save_pending_actions(suggestions)
 
-    # Upsert device inventory and fire a warning + notification for any new MAC.
     new_macs = upsert_devices(devices)
-    for mac in new_macs:
-        alert = Alert(
-            level="warning",
-            title=f"New device: {mac}",
-            message=f"Unknown device joined the network (MAC: {mac})",
-            timestamp=datetime.utcnow()
-        )
-        if not alert_storage.get_active_by_title(alert.title):
-            alert_storage.save(alert)
-            _send_desktop_notification(f"New device: {mac}", "Unknown device joined the network")
-            print(f"NEW DEVICE: {mac}")
-
-    alerts = alert_engine.run_checks()
-
-    for alert in alerts:
-        existing = alert_storage.get_active_by_title(alert.title)
-
-        if alert.level in ["critical", "warning"]:
-            if not existing:
-                # New alert — save it and notify for critical severity.
-                alert_storage.save(alert)
-                if alert.level == "critical":
-                    _send_desktop_notification(alert.title, alert.message)
-                print(f"NEW ALERT: {alert.title}")
-            else:
-                # Alert already exists — increment fire count; notify if just escalated.
-                escalated = alert_storage.increment_fire_count(alert.title)
-                if escalated:
-                    _send_desktop_notification(alert.title, f"Escalated to critical: {alert.message}")
-                    print(f"ESCALATED: {alert.title}")
-
-        elif alert.level == "info":
-            # Info alerts mean a condition has cleared — resolve the matching active alert
-            if existing:
-                alert_storage.resolve_by_title(alert.title)
-                print(f"RESOLVED: {alert.title}")
-
+    process_scan_alerts(new_macs, alert_storage, verbose=True)
     print(summary)
 
 
