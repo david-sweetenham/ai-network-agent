@@ -1,3 +1,25 @@
+"""
+network_summary.py — data collection, storage, and AI analysis
+
+Sections in this file:
+  1. Database setup       — init_db(), schema migrations
+  2. Summary storage      — save/load text summaries and AI analysis
+  3. Metric storage       — save/load numeric time-series metrics
+  4. Device inventory     — parse, upsert, and label LAN devices
+  5. AI-suggested actions — pending_actions table, approve/reject
+  6. Change detection     — detect_changes() compares scan to history
+  7. Network health       — ping tests via ping3
+  8. MetricAdapter        — bridges raw data into AlertEngine's format
+  9. Data collection      — collect_summary() runs arp-scan/vnstat/ss
+ 10. Desktop notifications
+ 11. AI analysis          — ask_ai(), parse_ai_suggestions(), ask_ai_chat()
+ 12. Shared alert logic   — process_scan_alerts() used by CLI and dashboard
+ 13. Entry point          — main() called by run_scan.sh
+
+If this file grows further, sections 3-5 are good candidates to extract
+into a db.py module, and sections 7-8 into a health.py module.
+"""
+
 import subprocess
 import sqlite3
 import re
