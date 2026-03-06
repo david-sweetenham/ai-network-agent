@@ -411,19 +411,13 @@ class MetricAdapter:
 # Collect metrics
 # -----------------------------
 
-def run(cmd):
-    # Runs a shell command and returns its stdout as a string.
-    # Wrapper around subprocess.getoutput() used by collect_summary().
-    return subprocess.getoutput(cmd)
-
-
 def get_connections_by_ip():
     # Parses live ss -tun output to count active TCP/UDP connections per peer IP.
     # Only counts peers in the 192.168.x.x range (local network devices).
     # Returns a dict mapping IP -> connection count, e.g. {"192.168.1.5": 3}.
     # This shows which local devices are actively communicating with this machine
     # without requiring gateway/router access.
-    conn_raw = run("ss -tun | tail -n +2")
+    conn_raw = subprocess.getoutput("ss -tun | tail -n +2")
     counts = {}
     for line in conn_raw.split("\n"):
         parts = line.split()
@@ -448,9 +442,9 @@ def collect_summary():
     #   - ss -tun: lists active TCP/UDP connections; counts non-header lines
     # Returns a tuple of (summary_text, device_count, dup_count, connection_count, bandwidth_today).
     # The summary_text is a formatted string used for display and AI input.
-    vnstat_raw = run("vnstat")
-    arp_raw = run("arp-scan --localnet")
-    conn_raw = run("ss -tun | tail -n +2")
+    vnstat_raw = subprocess.getoutput("vnstat")
+    arp_raw = subprocess.getoutput("arp-scan --localnet")
+    conn_raw = subprocess.getoutput("ss -tun | tail -n +2")
 
     device_count = len([l for l in arp_raw.split("\n") if "192.168" in l])
     dup_count = arp_raw.count("DUP")
