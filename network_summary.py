@@ -648,7 +648,7 @@ def process_scan_alerts(new_macs, alert_storage, verbose=False):
                 print(f"NEW DEVICE: {mac}")
 
     metric_adapter = MetricAdapter()
-    alert_engine = AlertEngine(metric_adapter)
+    alert_engine = AlertEngine(metric_adapter, alert_storage)
     for alert in alert_engine.run_checks():
         existing = alert_storage.get_active_by_title(alert.title)
         if alert.level in ["critical", "warning"]:

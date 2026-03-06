@@ -58,6 +58,44 @@ class AlertStorage:
         except sqlite3.OperationalError:
             pass
 
+        # Cooldown log — persists last-fired timestamps across process restarts.
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS alert_cooldowns (
+            key TEXT PRIMARY KEY,
+            last_fired TEXT NOT NULL
+        )
+        """)
+
+        conn.commit()
+        conn.close()
+
+    # -------------------------
+    # Cooldown persistence
+    # -------------------------
+
+    def get_last_fired(self, key):
+        # Returns the datetime the given alert key last fired, or None if never.
+        # Used by AlertEngine to check cooldown across process restarts.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT last_fired FROM alert_cooldowns WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            try:
+                return datetime.fromisoformat(row[0])
+            except ValueError:
+                return None
+        return None
+
+    def set_last_fired(self, key):
+        # Records the current UTC time as the last-fired time for this alert key.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO alert_cooldowns (key, last_fired) VALUES (?, ?)",
+            (key, datetime.utcnow().isoformat())
+        )
         conn.commit()
         conn.close()
 
@@ -195,25 +233,25 @@ class AlertEngine:
     # Evaluates current network metrics against thresholds and produces Alert objects.
     # Takes a metric_storage object (expected to have a get_latest() method that returns
     # a dict with host_reachable, latency_ms, and packet_loss keys).
-    # Maintains an in-memory cooldown dict to avoid flooding with repeat alerts —
+    # Cooldown state is persisted to the DB via alert_storage so it survives restarts —
     # the same alert key won't fire again until cooldown_minutes (10) have passed.
-    # Note: cooldown state is lost if the process restarts.
 
-    def __init__(self, metric_storage):
+    def __init__(self, metric_storage, alert_storage=None):
         self.metric_storage = metric_storage
-        self.last_alert_time = {}  # Maps alert key -> datetime of last fire
+        self.alert_storage = alert_storage
         self.cooldown_minutes = 10
 
     def can_alert(self, key):
         # Returns True if enough time has passed since the last alert for this key.
-        # Updates the last_alert_time for the key when returning True.
+        # Checks the DB when alert_storage is provided; falls back to always-true otherwise.
+        # Records the current time as the last-fired timestamp when returning True.
         now = datetime.utcnow()
-        last = self.last_alert_time.get(key)
-
-        if not last or now - last > timedelta(minutes=self.cooldown_minutes):
-            self.last_alert_time[key] = now
-            return True
-        return False
+        if self.alert_storage:
+            last = self.alert_storage.get_last_fired(key)
+            if last and now - last <= timedelta(minutes=self.cooldown_minutes):
+                return False
+            self.alert_storage.set_last_fired(key)
+        return True
 
     def run_checks(self):
         # Fetches the latest metrics and runs all threshold checks.
