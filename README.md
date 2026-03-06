@@ -38,6 +38,7 @@ A self-hosted home network monitoring agent with an AI-powered web dashboard. Sc
 - Tabbed layout: Overview, Summary, Devices, Trends
 - Active alert count badge on the Overview tab
 - Dark and light theme with toggle (preference saved to localStorage)
+- **Demo Mode** — anonymises all real MAC addresses and IP addresses with consistent fake values throughout the entire dashboard; useful for screenshots and sharing without exposing private network data. Toggle persists across sessions.
 - Collapsible cards (state saved to localStorage)
 - Trend charts for bandwidth, device count, and duplicate ARP events (Chart.js)
 - CSV export endpoints for metrics, devices, and alerts — compatible with Power BI and Databricks
@@ -51,9 +52,23 @@ A self-hosted home network monitoring agent with an AI-powered web dashboard. Sc
 
 ## Screenshots
 
-> _Screenshots coming soon._
->
-> The dashboard has four tabs: **Overview** (active alerts and AI suggestions), **Summary** (latest scan results and AI analysis), **Devices** (full device inventory with labels), and **Trends** (bandwidth, device count, and duplicate ARP charts). A floating chat button is available on every tab.
+> All screenshots taken with **Demo Mode** active — MAC addresses and IPs are anonymised.
+
+**Overview** — active alerts with type badges, recently resolved alerts, AI suggestions, and the floating chat panel
+
+![Overview tab](DemoScreenshots/001.jpeg)
+
+**Summary** — latest scan metrics and plain-English AI analysis
+
+![Summary tab](DemoScreenshots/002.jpeg)
+
+**Devices** — full device inventory with labels, anonymised MACs and IPs, and active connection counts
+
+![Devices tab](DemoScreenshots/003.jpeg)
+
+**Trends** — historical bandwidth, device count, and duplicate ARP charts
+
+![Trends tab](DemoScreenshots/004.jpeg)
 
 ---
 

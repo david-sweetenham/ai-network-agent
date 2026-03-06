@@ -277,6 +277,7 @@ table.device-table td {
 }
 .toggle-switch input:checked + .toggle-track { background:#6366f1; }
 .toggle-switch input:checked + .toggle-track::before { transform:translateX(20px); }
+#demo-checkbox:checked + .toggle-track { background:#f59e0b; }
 
 /* Button bar */
 .btn-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
@@ -348,6 +349,17 @@ table.device-table td {
     </label>
     <span class="t-icon">☀️</span>
   </div>
+  <div class="theme-toggle-wrap" style="margin-left:12px;">
+    <label class="toggle-switch" title="Demo mode — anonymises MAC addresses and IPs">
+      <input type="checkbox" id="demo-checkbox">
+      <span class="toggle-track"></span>
+    </label>
+    <span style="font-size:12px;color:var(--muted);line-height:1;">Demo</span>
+  </div>
+</div>
+
+<div id="demo-banner" style="display:none;position:fixed;top:0;left:0;right:0;background:#f59e0b;color:#1e293b;text-align:center;padding:9px 16px;font-weight:600;font-size:13px;z-index:3000;letter-spacing:0.01em;">
+  🕵️ Demo Mode Active — MAC addresses and IPs are anonymised
 </div>
 
 <div class="status-bar">
@@ -732,6 +744,86 @@ fetch('/metrics')
   document.getElementById('device-modal').addEventListener('click', function(e){
     if (e.target === this) this.style.display = 'none';
   });
+})();
+
+// Demo mode — replaces real MACs and IPs with consistent fake values
+(function(){
+  var DEMO_KEY = 'demo-mode';
+  var macMap = {}, ipMap = {};
+  var MAC_PREFIXES = ['DE:AD:BE', 'FA:KE:01', 'C0:FF:EE', '00:1A:2B', 'AC:DE:48'];
+  var MAC_RE = /([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/g;
+  var IP_RE = /\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b/g;
+
+  function hash(s) {
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+
+  function fakeMac(real) {
+    var key = real.toUpperCase();
+    if (!macMap[key]) {
+      var h = hash(key);
+      var pfx = MAC_PREFIXES[h % MAC_PREFIXES.length];
+      var b = function(n){ return ('0' + (n & 0xFF).toString(16)).slice(-2).toUpperCase(); };
+      macMap[key] = pfx + ':' + b(h >> 8) + ':' + b(h >> 16) + ':' + b(h >> 24);
+    }
+    return macMap[key];
+  }
+
+  function fakeIp(real) {
+    if (!ipMap[real]) {
+      var h = hash(real);
+      ipMap[real] = '10.0.' + ((h >> 8) & 0xFE) + '.' + ((h & 0xFE) || 2);
+    }
+    return ipMap[real];
+  }
+
+  function anonymiseText(t) {
+    return t.replace(MAC_RE, function(m){ return fakeMac(m); })
+            .replace(IP_RE,  function(m){ return fakeIp(m); });
+  }
+
+  function anonymiseNode(node) {
+    if (node.nodeType === 3) {
+      var o = node.textContent, r = anonymiseText(o);
+      if (r !== o) node.textContent = r;
+    } else if (node.nodeType === 1) {
+      ['title', 'placeholder', 'value'].forEach(function(a){
+        if (node.hasAttribute && node.hasAttribute(a)) {
+          var o = node.getAttribute(a), r = anonymiseText(o);
+          if (r !== o) node.setAttribute(a, r);
+        }
+      });
+      node.childNodes.forEach(anonymiseNode);
+    }
+  }
+
+  function setDemo(on) {
+    document.getElementById('demo-banner').style.display = on ? 'block' : 'none';
+    document.getElementById('demo-checkbox').checked = on;
+    localStorage.setItem(DEMO_KEY, on ? '1' : '0');
+    if (on) {
+      anonymiseNode(document.body);
+    } else {
+      location.reload();
+    }
+  }
+
+  document.getElementById('demo-checkbox').addEventListener('change', function(){
+    setDemo(this.checked);
+  });
+
+  if (localStorage.getItem(DEMO_KEY) === '1') {
+    // Watch the device table so async-rendered content gets anonymised too
+    var observer = new MutationObserver(function(muts){
+      muts.forEach(function(m){
+        m.addedNodes.forEach(function(n){ anonymiseNode(n); });
+      });
+    });
+    observer.observe(document.getElementById('device-table'), { childList: true, subtree: true });
+    setDemo(true);
+  }
 })();
 </script>
 
