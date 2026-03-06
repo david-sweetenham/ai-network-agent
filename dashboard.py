@@ -553,56 +553,6 @@ fetch('/metrics')
 });
 </script>
 
-<script>
-// Chat
-(function(){
-  var box = document.getElementById('chat-messages');
-  var input = document.getElementById('chat-input');
-  var btn = document.getElementById('chat-send');
-
-  function addMsg(text, role) {
-    var div = document.createElement('div');
-    div.className = 'chat-msg chat-' + role;
-    div.textContent = text;
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
-    return div;
-  }
-
-  async function send() {
-    var msg = input.value.trim();
-    if (!msg) return;
-    input.value = '';
-    addMsg(msg, 'user');
-    var thinking = addMsg('Thinking…', 'ai');
-    btn.disabled = true; input.disabled = true;
-    try {
-      var res = await fetch('/chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({message: msg})
-      });
-      var data = await res.json();
-      thinking.textContent = data.reply;
-    } catch(e) {
-      thinking.textContent = 'Could not reach AI.';
-    }
-    btn.disabled = false; input.disabled = false; input.focus();
-  }
-
-  btn.addEventListener('click', send);
-  input.addEventListener('keydown', function(e){ if(e.key === 'Enter') send(); });
-
-  // Suggestion chips use event delegation because the floating chat HTML is
-  // rendered after this script block, so querySelectorAll would return empty.
-  document.addEventListener('click', function(e){
-    if (!e.target.classList.contains('chat-suggestion')) return;
-    input.value = e.target.textContent.trim();
-    document.getElementById('chat-suggestions').style.display = 'none';
-    send();
-  });
-})();
-</script>
 
 <script>
 // Theme toggle
@@ -703,6 +653,54 @@ fetch('/metrics')
   var panel = document.getElementById('chat-panel');
   fab.addEventListener('click', function(){ panel.classList.toggle('open'); });
   document.getElementById('chat-close').addEventListener('click', function(){ panel.classList.remove('open'); });
+})();
+
+// Chat — must run after floating chat HTML so all IDs exist
+(function(){
+  var box   = document.getElementById('chat-messages');
+  var input = document.getElementById('chat-input');
+  var btn   = document.getElementById('chat-send');
+
+  function addMsg(text, role) {
+    var div = document.createElement('div');
+    div.className = 'chat-msg chat-' + role;
+    div.textContent = text;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+    return div;
+  }
+
+  async function send() {
+    var msg = input.value.trim();
+    if (!msg) return;
+    input.value = '';
+    addMsg(msg, 'user');
+    var thinking = addMsg('Thinking\u2026', 'ai');
+    btn.disabled = true; input.disabled = true;
+    try {
+      var res = await fetch('/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: msg})
+      });
+      var data = await res.json();
+      thinking.textContent = data.reply;
+    } catch(e) {
+      thinking.textContent = 'Could not reach AI.';
+    }
+    btn.disabled = false; input.disabled = false; input.focus();
+  }
+
+  btn.addEventListener('click', send);
+  input.addEventListener('keydown', function(e){ if(e.key === 'Enter') send(); });
+
+  document.querySelectorAll('.chat-suggestion').forEach(function(chip){
+    chip.addEventListener('click', function(){
+      input.value = chip.textContent.trim();
+      document.getElementById('chat-suggestions').style.display = 'none';
+      send();
+    });
+  });
 })();
 
 // Device detail modal
