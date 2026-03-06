@@ -106,7 +106,7 @@ These are installed automatically in the venv during setup.
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/DrD3d0v3rd3/ai-network-agent.git
+git clone https://github.com/david-sweetenham/ai-network-agent.git
 cd ai-network-agent
 
 # 2. Create and activate a virtual environment
