@@ -6,3 +6,6 @@ venv/
 
 # Databases (runtime data, not source)
 *.db
+
+# Claude Code session data (prompts, memory, settings — never commit)
+.claude/
