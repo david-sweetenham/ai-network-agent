@@ -165,6 +165,68 @@ Add a line to scan every 3 hours (adjust the path to match your install location
 
 ---
 
+## Docker
+
+Docker is the recommended way to run this on a dedicated machine such as a Raspberry Pi or home server. It handles all system and Python dependencies automatically.
+
+### Prerequisites
+
+- Docker and Docker Compose installed
+- **Ollama running on the host machine** (not inside Docker) with the `mistral` model pulled — see [Requirements](#requirements)
+- `vnstatd` running on the host and collecting traffic data
+- Linux host — `network_mode: host` is not supported on Docker Desktop for macOS or Windows
+
+### Quick start
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/david-sweetenham/ai-network-agent.git
+cd ai-network-agent
+
+# 2. Create the database file — required before first run.
+#    If this file is missing, Docker creates a directory here instead,
+#    which causes SQLite to fail.
+touch network_history.db
+
+# 3. Build and start the container
+docker-compose up -d
+
+# 4. Follow the logs
+docker-compose logs -f
+```
+
+The dashboard will be available at `http://<host-ip>:5000` immediately.
+
+### Run a manual scan (Docker)
+
+```bash
+docker exec ai-network-advisor python network_summary.py
+```
+
+### Schedule automatic scans with cron (Docker)
+
+```bash
+crontab -e
+```
+
+```cron
+0 */3 * * * docker exec ai-network-advisor python network_summary.py >> /var/log/network-scan.log 2>&1
+```
+
+### Change credentials (Docker)
+
+Edit `dashboard.py` to update `DASHBOARD_USER` and `DASHBOARD_PASS`, then rebuild:
+
+```bash
+docker-compose up -d --build
+```
+
+### Why `network_mode: host`?
+
+`arp-scan` needs to send raw Ethernet frames on your physical network interface. Docker's default bridge networking isolates the container from the LAN, so arp-scan would only see other Docker containers rather than your real devices. Host networking gives the container direct access to the host's network stack, solving this cleanly. It also means Ollama at `localhost:11434` is reachable without any extra configuration.
+
+---
+
 ## Data exports
 
 Three CSV endpoints are available for integration with external tools:
@@ -188,6 +250,9 @@ ai-network-agent/
 ├── dashboard.py         # Flask app; full HTML/CSS/JS as inline template string
 ├── run_scan.sh          # CLI entry point — safe to run from cron
 ├── start_dashboard.sh   # Starts the Flask dev server
+├── Dockerfile           # Container image definition
+├── docker-compose.yml   # Service definition with host networking and volumes
+├── requirements.txt     # Python dependencies
 └── network_history.db   # SQLite database (created on first run)
 ```
 

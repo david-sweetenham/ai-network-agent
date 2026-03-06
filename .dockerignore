@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.db
+.git/
+.claude/
+README.md
+CLAUDE.md
+*.sh

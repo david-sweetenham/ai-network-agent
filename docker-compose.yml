@@ -1,0 +1,32 @@
+services:
+  dashboard:
+    build: .
+    container_name: ai-network-advisor
+
+    # host networking is required for two reasons:
+    #   1. arp-scan must see the physical LAN — bridge networking only shows the Docker network
+    #   2. Ollama at localhost:11434 on the host is reachable without extra configuration
+    # NOTE: network_mode: host is Linux only. Docker Desktop on macOS and Windows
+    # does not support it. Use the manual installation method on those platforms.
+    network_mode: host
+
+    # NET_RAW is required for arp-scan (raw Ethernet frames) and ping3 (ICMP).
+    cap_add:
+      - NET_RAW
+
+    volumes:
+      # Persist the SQLite database across container restarts.
+      # IMPORTANT: run `touch network_history.db` once before first `docker-compose up`.
+      # If this file does not exist Docker will create a directory here instead,
+      # which will cause SQLite to fail on startup.
+      - ./network_history.db:/app/network_history.db
+
+      # Mount the host vnstat database read-only so bandwidth stats reflect real
+      # traffic history rather than starting from zero inside the container.
+      # Requires vnstatd to be running on the host and collecting data.
+      - /var/lib/vnstat:/var/lib/vnstat:ro
+
+    restart: unless-stopped
+
+    environment:
+      - PYTHONUNBUFFERED=1
