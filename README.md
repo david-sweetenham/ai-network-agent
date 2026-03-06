@@ -120,14 +120,19 @@ pip install flask ping3 requests
 chmod +x run_scan.sh start_dashboard.sh
 ```
 
-### Optional: configure credentials
+### Change the default credentials
 
-The dashboard is protected by HTTP Basic Auth. The defaults are `admin` / `changeme`. Change them in [dashboard.py](dashboard.py) before exposing the dashboard on your network:
+> [!CAUTION]
+> **Do this before running the dashboard.** The default credentials are `admin` / `changeme` and are public knowledge because this is an open-source repository. Anyone on your network can log in with those credentials until you change them.
+
+Edit [dashboard.py](dashboard.py) and update these two lines near the top:
 
 ```python
 DASHBOARD_USER = "admin"
 DASHBOARD_PASS = "changeme"   # <-- change this
 ```
+
+The Flask dev server does not support HTTPS. Do not expose port 5000 to the internet — keep it behind your router/firewall and treat it as a LAN-only tool.
 
 ---
 
@@ -215,6 +220,9 @@ crontab -e
 
 ### Change credentials (Docker)
 
+> [!CAUTION]
+> Change the default credentials before starting the container. See the [credentials warning](#change-the-default-credentials) above.
+
 Edit `dashboard.py` to update `DASHBOARD_USER` and `DASHBOARD_PASS`, then rebuild:
 
 ```bash
@@ -283,6 +291,30 @@ ai-network-agent/
 | Auth | HTTP Basic Auth |
 
 No external AI APIs, no Docker required, no cloud dependencies. Everything runs on the local machine.
+
+---
+
+## Security
+
+> [!WARNING]
+> This tool is designed for **personal home network use only**. It is not suitable for production environments or networks you do not own and have permission to monitor.
+
+- Only run this on networks you own or have explicit permission to scan. ARP scanning without authorisation may be illegal in your jurisdiction.
+- The Flask development server has no HTTPS support. Keep port 5000 behind your router and do not expose it to the internet.
+- HTTP Basic Auth sends credentials in base64 (not encrypted) over the connection. On a home LAN this is generally acceptable; over the internet it is not.
+- Change the default credentials (`admin` / `changeme`) before first use — see [above](#change-the-default-credentials).
+
+---
+
+## Disclaimer
+
+This software is provided for educational and personal home-use purposes. The author accepts no responsibility for misuse, data loss, network disruption, security incidents, or any other damages arising from use of this software. Use it on your own network, at your own risk, and in compliance with the laws of your jurisdiction.
+
+---
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
 
 ---
 
