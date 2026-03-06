@@ -562,7 +562,7 @@ new Chart(document.getElementById('arpChart'), {
   document.querySelectorAll('.card').forEach(function(card){
     var heading = card.querySelector('h2, h3');
     if (!heading) return;
-    var key = 'collapse:' + heading.textContent.trim().replace(/\s+/g,' ').substring(0, 40);
+    var key = 'collapse:' + heading.textContent.trim().replace(/[\s]+/g,' ').substring(0, 40);
     var chevron = document.createElement('span');
     chevron.className = 'chevron';
     heading.appendChild(chevron);
