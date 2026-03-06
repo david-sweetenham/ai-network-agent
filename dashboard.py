@@ -3,6 +3,7 @@ import network_summary
 import sqlite3
 import csv
 import io
+import functools
 from alerts import AlertStorage
 from datetime import datetime
 
@@ -11,6 +12,26 @@ app = Flask(__name__)
 # AlertStorage is instantiated once at startup and shared across all requests.
 # It handles reading active/resolved alerts from the SQLite database.
 alert_storage = AlertStorage()
+
+# Basic auth credentials for the dashboard.
+# Change these before exposing the dashboard outside localhost.
+DASHBOARD_USER = "admin"
+DASHBOARD_PASS = "changeme"
+
+def require_auth(f):
+    # Decorator that enforces HTTP Basic Auth on any route it wraps.
+    # Returns a 401 with WWW-Authenticate header so the browser shows a login prompt.
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        auth = request.authorization
+        if not auth or auth.username != DASHBOARD_USER or auth.password != DASHBOARD_PASS:
+            return Response(
+                "Authentication required",
+                401,
+                {"WWW-Authenticate": 'Basic realm="Network Dashboard"'}
+            )
+        return f(*args, **kwargs)
+    return wrapper
 
 # The full HTML/CSS/JS for the dashboard is defined as a single inline string.
 # This avoids needing a templates/ directory. Jinja2 variables ({{ }}) are injected
@@ -605,6 +626,7 @@ def _scan_times():
 
 
 @app.route("/")
+@require_auth
 def home():
     # Renders the main dashboard page.
     # Reads active and recently resolved alerts fresh from the DB on every request
@@ -627,6 +649,7 @@ def home():
     )
 
 @app.route("/run")
+@require_auth
 def run_scan():
     # Triggers a full network scan inline (same logic as run_scan.sh but with AI analysis).
     # Steps:
@@ -710,6 +733,7 @@ def connections_endpoint():
 
 
 @app.route("/devices/<mac>/label", methods=["POST"])
+@require_auth
 def label_device(mac):
     # Saves a human-readable label for a device and resolves its "New device" alert.
     # Labelling a device is the user's way of saying "I know what this is" —
@@ -722,6 +746,7 @@ def label_device(mac):
 
 
 @app.route("/chat", methods=["POST"])
+@require_auth
 def chat():
     # Accepts a JSON body with a "message" key and returns an AI reply as JSON.
     # Passes the current in-memory summary and analysis as context so the model
@@ -736,6 +761,7 @@ def chat():
 
 
 @app.route("/actions/<int:action_id>/approve", methods=["POST"])
+@require_auth
 def approve_action(action_id):
     # Executes the AI-suggested action and marks it approved.
     network_summary.approve_action(action_id)
@@ -743,6 +769,7 @@ def approve_action(action_id):
 
 
 @app.route("/actions/<int:action_id>/reject", methods=["POST"])
+@require_auth
 def reject_action(action_id):
     # Dismisses the suggestion without executing it.
     network_summary.reject_action(action_id)
