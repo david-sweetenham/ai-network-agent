@@ -24,6 +24,7 @@ import subprocess
 import sqlite3
 import re
 import json
+import shutil
 import requests
 from datetime import datetime
 from ping3 import ping
@@ -673,8 +674,8 @@ Do not include placeholder or example lines — only real suggestions based on t
             },
             timeout=60
         )
-
-        return response.json()["response"]
+        response.raise_for_status()
+        return response.json().get("response", "AI returned an unexpected response format.")
 
     except Exception as e:
         return f"AI analysis unavailable: {e}"
@@ -743,7 +744,8 @@ USER QUESTION: {message}
             json={"model": "mistral", "prompt": prompt, "stream": False},
             timeout=60
         )
-        return response.json()["response"]
+        response.raise_for_status()
+        return response.json().get("response", "AI returned an unexpected response format.")
     except Exception as e:
         return f"AI unavailable: {e}"
 
@@ -823,6 +825,23 @@ def process_scan_alerts(new_macs, alert_storage, verbose=False,
 # MAIN
 # -----------------------------
 
+def check_dependencies():
+    # Checks that required system tools are on PATH and warns to stderr if any are missing.
+    # Missing tools don't abort the scan — they produce empty output and zero counts instead.
+    required = {
+        "arp-scan": "LAN device discovery (sudo setcap cap_net_raw+ep $(which arp-scan) if needed)",
+        "vnstat":   "bandwidth monitoring",
+        "ss":       "active connection counting",
+        "ip":       "gateway IP detection",
+    }
+    missing = [f"  {cmd}: {desc}" for cmd, desc in required.items() if not shutil.which(cmd)]
+    if missing:
+        import sys
+        print("WARNING: the following tools are not on PATH — related metrics will be empty:",
+              file=sys.stderr)
+        print("\n".join(missing), file=sys.stderr)
+
+
 def main():
     # Entry point for running a scan from the command line (called by run_scan.sh).
     # Steps:
@@ -832,6 +851,7 @@ def main():
     #   4. Saves new critical/warning alerts; resolves existing alerts when conditions clear
     #   5. Prints the plain-text summary to stdout
     # Note: the AI analysis step is omitted here — it only runs via the dashboard /run route.
+    check_dependencies()
     init_db()
 
     alert_storage = AlertStorage()
