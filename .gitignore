@@ -9,3 +9,7 @@ venv/
 
 # Claude Code session data (prompts, memory, settings — never commit)
 .claude/
+
+# Local credentials — never commit
+.env
+.scan.lock

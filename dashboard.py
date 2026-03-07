@@ -4,6 +4,7 @@ import sqlite3
 import csv
 import io
 import functools
+import os
 from alerts import AlertStorage
 from datetime import datetime
 
@@ -13,10 +14,11 @@ app = Flask(__name__)
 # It handles reading active/resolved alerts from the SQLite database.
 alert_storage = AlertStorage()
 
-# Basic auth credentials for the dashboard.
-# Change these before exposing the dashboard outside localhost.
-DASHBOARD_USER = "admin"
-DASHBOARD_PASS = "changeme"
+# Basic auth credentials — loaded from environment variables.
+# Set DASHBOARD_USER and DASHBOARD_PASS in your .env file (never commit .env).
+# Falls back to placeholder values if the env vars are not set.
+DASHBOARD_USER = os.environ.get("DASHBOARD_USER", "admin")
+DASHBOARD_PASS = os.environ.get("DASHBOARD_PASS", "changeme")
 
 def require_auth(f):
     # Decorator that enforces HTTP Basic Auth on any route it wraps.
@@ -976,6 +978,7 @@ def run_scan():
     return redirect(url_for("home"))
 
 @app.route("/metrics")
+@require_auth
 def metrics():
     # Returns all historical metric rows as JSON for the Chart.js trend charts.
     # Reads every row from the metrics table in chronological order (oldest first)
@@ -996,6 +999,7 @@ def metrics():
     }
 
 @app.route("/devices")
+@require_auth
 def devices_endpoint():
     # Returns the full device inventory as JSON for the dashboard table.
     rows = network_summary.load_devices()
@@ -1027,6 +1031,7 @@ def history():
 
 
 @app.route("/connections")
+@require_auth
 def connections_endpoint():
     # Returns a live count of active TCP/UDP connections per local network IP.
     # Used by the device table to show which devices are currently talking to this machine.
@@ -1093,6 +1098,7 @@ def _csv_response(filename, headers, rows):
 
 
 @app.route("/export/metrics.csv")
+@require_auth
 def export_metrics():
     # Downloads the full metrics history as a CSV file.
     # Columns match the metrics table: timestamp, device_count, dup_arp, connections, bandwidth_today.
@@ -1110,6 +1116,7 @@ def export_metrics():
 
 
 @app.route("/export/devices.csv")
+@require_auth
 def export_devices():
     # Downloads the full device inventory as a CSV file.
     # Columns: mac_address, ip_address, first_seen, last_seen.
@@ -1127,6 +1134,7 @@ def export_devices():
 
 
 @app.route("/export/alerts.csv")
+@require_auth
 def export_alerts():
     # Downloads the full alert history as a CSV file, including resolved alerts.
     # Columns: level, title, message, created_at, resolved (0=active, 1=resolved).
