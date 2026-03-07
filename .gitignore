@@ -12,4 +12,4 @@ venv/
 
 # Local credentials — never commit
 .env
-.scan.lock
+scan.lock
