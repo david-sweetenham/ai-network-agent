@@ -510,6 +510,13 @@ table.device-table td {
 </script>
 
 <script>
+// Escape untrusted strings before inserting into innerHTML.
+function esc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // Device table
 Promise.all([fetch('/devices').then(r => r.json()), fetch('/connections').then(r => r.json())])
 .then(([devData, connData]) => {
@@ -530,15 +537,15 @@ Promise.all([fetch('/devices').then(r => r.json()), fetch('/connections').then(r
         html += `<tr>
             <td style="text-align:center;">${statusDot}</td>
             <td style="font-family:system-ui;">
-                <form method="POST" action="/devices/${d.mac}/label" style="display:flex;gap:6px;align-items:center;">
-                    <input type="text" name="label" value="${d.label}" placeholder="Unlabelled"
+                <form method="POST" action="/devices/${esc(d.mac)}/label" style="display:flex;gap:6px;align-items:center;">
+                    <input type="text" name="label" value="${esc(d.label)}" placeholder="Unlabelled"
                         style="background:#1f2937;border:1px solid ${unlabelled ? '#f59e0b' : '#374151'};color:#e5e7eb;padding:3px 8px;border-radius:4px;font-size:12px;width:130px;">
                     <button type="submit" style="background:#374151;padding:3px 8px;font-size:11px;margin:0;">Save</button>
                 </form>
             </td>
-            <td>${d.mac}</td><td>${d.ip}</td>
+            <td>${esc(d.mac)}</td><td>${esc(d.ip)}</td>
             <td style="${connStyle}">${connCount > 0 ? connCount : '—'}</td>
-            <td>${d.first_seen}</td><td>${d.last_seen}</td>
+            <td>${esc(d.first_seen)}</td><td>${esc(d.last_seen)}</td>
         </tr>`;
     });
     html += '</tbody></table>';
@@ -559,7 +566,7 @@ fetch('/history')
     let html = '<table class="device-table"><thead><tr><th>Timestamp</th><th>Devices</th><th>Bandwidth</th></tr></thead><tbody>';
     data.history.forEach(h => {
         html += `<tr>
-            <td>${h.timestamp}</td>
+            <td>${esc(h.timestamp)}</td>
             <td style="font-family:system-ui;">${h.devices != null ? h.devices : '—'}</td>
             <td style="font-family:system-ui;">${h.bandwidth != null ? h.bandwidth.toFixed(2) + ' GiB' : '—'}</td>
         </tr>`;
@@ -757,11 +764,11 @@ fetch('/metrics')
         document.getElementById('modal-title').textContent = d.label || mac;
         document.getElementById('modal-body').innerHTML =
           '<table style="width:100%;font-size:13px;border-collapse:collapse;">' +
-          '<tr><td style="padding:6px 0;color:var(--muted);width:90px;">MAC</td><td style="font-family:monospace;">' + d.mac + '</td></tr>' +
-          '<tr><td style="padding:6px 0;color:var(--muted);">IP</td><td style="font-family:monospace;">' + d.ip + '</td></tr>' +
-          '<tr><td style="padding:6px 0;color:var(--muted);">Label</td><td>' + (d.label || '<em style="color:var(--muted)">Unlabelled</em>') + '</td></tr>' +
-          '<tr><td style="padding:6px 0;color:var(--muted);">First seen</td><td>' + d.first_seen + '</td></tr>' +
-          '<tr><td style="padding:6px 0;color:var(--muted);">Last seen</td><td>' + d.last_seen + '</td></tr>' +
+          '<tr><td style="padding:6px 0;color:var(--muted);width:90px;">MAC</td><td style="font-family:monospace;">' + esc(d.mac) + '</td></tr>' +
+          '<tr><td style="padding:6px 0;color:var(--muted);">IP</td><td style="font-family:monospace;">' + esc(d.ip) + '</td></tr>' +
+          '<tr><td style="padding:6px 0;color:var(--muted);">Label</td><td>' + (d.label ? esc(d.label) : '<em style="color:var(--muted)">Unlabelled</em>') + '</td></tr>' +
+          '<tr><td style="padding:6px 0;color:var(--muted);">First seen</td><td>' + esc(d.first_seen) + '</td></tr>' +
+          '<tr><td style="padding:6px 0;color:var(--muted);">Last seen</td><td>' + esc(d.last_seen) + '</td></tr>' +
           '</table>' +
           '<p style="margin-top:14px;font-size:12px;color:var(--muted);">Go to the Devices tab to add a label for this device.</p>';
         document.getElementById('device-modal').style.display = 'flex';
