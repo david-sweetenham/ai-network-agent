@@ -959,44 +959,52 @@ def run_scan():
     # Triggers a full network scan inline (same logic as run_scan.sh but with AI analysis).
     # Steps:
     #   1. Ensures DB schema exists
-    #   2. Collects current metrics via arp-scan, vnstat, ss
-    #   3. Compares to recent history to detect anomalies
-    #   4. Sends summary + anomalies to Ollama (mistral) for AI analysis
-    #   5. Saves metrics and summary to the DB
-    #   6. Updates the in-memory globals so the dashboard shows fresh data
-    #   7. Redirects back to / so the user sees the updated dashboard
-    # Note: alert checks are NOT run here — they only run via network_summary.main().
+    #   2. Acquires scan lock — returns 503 immediately if a CLI scan is already running
+    #   3. Collects current metrics via arp-scan, vnstat, ss
+    #   4. Compares to recent history to detect anomalies
+    #   5. Sends summary + anomalies to Ollama (mistral) for AI analysis
+    #   6. Saves metrics and summary to the DB
+    #   7. Updates the in-memory globals so the dashboard shows fresh data
+    #   8. Redirects back to / so the user sees the updated dashboard
     global latest_summary, latest_analysis
 
     network_summary.init_db()
-    today_summary, device_count, dup_arp, connections, bandwidth, devices = network_summary.collect_summary()
 
-    history_metrics = network_summary.load_recent_metrics()
-    changes = network_summary.detect_changes(
-        (device_count, dup_arp, connections, bandwidth),
-        history_metrics
-    )
+    lock = network_summary.acquire_scan_lock()
+    if lock is None:
+        return "A scan is already running — please wait and refresh.", 503
 
-    latest_summary = today_summary
+    try:
+        today_summary, device_count, dup_arp, connections, bandwidth, devices = network_summary.collect_summary()
 
-    # Pass last 8 summaries as historical context so the AI can spot trends.
-    history_rows = network_summary.load_recent_summaries()
-    history_text = "\n\n".join(f"[{ts}]\n{s.strip()}" for ts, s in history_rows)
-    raw_analysis = network_summary.ask_ai(
-        today_summary + "\nDetected changes:\n" + changes, history_text
-    )
-    latest_analysis, suggestions = network_summary.parse_ai_suggestions(raw_analysis)
+        history_metrics = network_summary.load_recent_metrics()
+        changes = network_summary.detect_changes(
+            (device_count, dup_arp, connections, bandwidth),
+            history_metrics
+        )
 
-    network_summary.save_metrics(device_count, dup_arp, connections, bandwidth)
-    network_summary.save_summary(today_summary, latest_analysis)
-    network_summary.save_pending_actions(suggestions)
+        latest_summary = today_summary
 
-    new_macs = network_summary.upsert_devices(devices)
-    went_offline, came_online = network_summary.update_device_status([d[0] for d in devices])
-    network_summary.process_scan_alerts(new_macs, alert_storage,
-                                        devices=devices,
-                                        went_offline=went_offline,
-                                        came_online=came_online)
+        # Pass last 8 summaries as historical context so the AI can spot trends.
+        history_rows = network_summary.load_recent_summaries()
+        history_text = "\n\n".join(f"[{ts}]\n{s.strip()}" for ts, s in history_rows)
+        raw_analysis = network_summary.ask_ai(
+            today_summary + "\nDetected changes:\n" + changes, history_text
+        )
+        latest_analysis, suggestions = network_summary.parse_ai_suggestions(raw_analysis)
+
+        network_summary.save_metrics(device_count, dup_arp, connections, bandwidth)
+        network_summary.save_summary(today_summary, latest_analysis)
+        network_summary.save_pending_actions(suggestions)
+
+        new_macs = network_summary.upsert_devices(devices)
+        went_offline, came_online = network_summary.update_device_status([d[0] for d in devices])
+        network_summary.process_scan_alerts(new_macs, alert_storage,
+                                            devices=devices,
+                                            went_offline=went_offline,
+                                            came_online=came_online)
+    finally:
+        network_summary.release_scan_lock(lock)
 
     return redirect(url_for("home"))
 

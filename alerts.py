@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -27,8 +28,8 @@ class Alert:
 class AlertStorage:
     # Handles reading and writing alerts to the SQLite database.
     # Each alert row tracks whether it has been resolved (resolved = 0/1).
-    # Deduplication is done by title — only one unresolved alert per title
-    # can exist at a time.
+    # Deduplication is enforced at the DB level via a partial unique index on
+    # (title) WHERE resolved = 0, so INSERT OR IGNORE in save() is atomic.
 
     def __init__(self, db_path="network_history.db"):
         self.db_path = db_path
@@ -37,37 +38,46 @@ class AlertStorage:
     def _init_db(self):
         # Creates the alerts table if it doesn't already exist.
         # Called automatically on construction so callers don't need to worry about setup.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as conn:
+            cursor = conn.cursor()
 
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            level TEXT NOT NULL,
-            title TEXT NOT NULL,
-            message TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            resolved INTEGER DEFAULT 0,
-            fire_count INTEGER DEFAULT 1
-        )
-        """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                level TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                resolved INTEGER DEFAULT 0,
+                fire_count INTEGER DEFAULT 1
+            )
+            """)
 
-        # Migrate older databases that don't have the fire_count column yet.
-        try:
-            cursor.execute("ALTER TABLE alerts ADD COLUMN fire_count INTEGER DEFAULT 1")
-        except sqlite3.OperationalError:
-            pass
+            # Migrate older databases that don't have the fire_count column yet.
+            try:
+                cursor.execute("ALTER TABLE alerts ADD COLUMN fire_count INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
 
-        # Cooldown log — persists last-fired timestamps across process restarts.
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS alert_cooldowns (
-            key TEXT PRIMARY KEY,
-            last_fired TEXT NOT NULL
-        )
-        """)
+            # Cooldown log — persists last-fired timestamps across process restarts.
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS alert_cooldowns (
+                key TEXT PRIMARY KEY,
+                last_fired TEXT NOT NULL
+            )
+            """)
 
-        conn.commit()
-        conn.close()
+            # Partial unique index prevents duplicate active alerts for the same title.
+            # INSERT OR IGNORE in save() relies on this constraint to be atomic.
+            try:
+                cursor.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_active_title
+                    ON alerts(title) WHERE resolved = 0
+                """)
+            except sqlite3.OperationalError:
+                pass
+
+            conn.commit()
 
     # -------------------------
     # Cooldown persistence
@@ -76,11 +86,10 @@ class AlertStorage:
     def get_last_fired(self, key):
         # Returns the datetime the given alert key last fired, or None if never.
         # Used by AlertEngine to check cooldown across process restarts.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT last_fired FROM alert_cooldowns WHERE key = ?", (key,))
-        row = cursor.fetchone()
-        conn.close()
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT last_fired FROM alert_cooldowns WHERE key = ?", (key,))
+            row = cursor.fetchone()
         if row:
             try:
                 return datetime.fromisoformat(row[0])
@@ -90,14 +99,13 @@ class AlertStorage:
 
     def set_last_fired(self, key):
         # Records the current UTC time as the last-fired time for this alert key.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT OR REPLACE INTO alert_cooldowns (key, last_fired) VALUES (?, ?)",
-            (key, datetime.utcnow().isoformat())
-        )
-        conn.commit()
-        conn.close()
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO alert_cooldowns (key, last_fired) VALUES (?, ?)",
+                (key, datetime.utcnow().isoformat())
+            )
+            conn.commit()
 
     # -------------------------
     # Create / Update Alerts
@@ -105,37 +113,32 @@ class AlertStorage:
 
     def save(self, alert: Alert):
         # Inserts a new alert row into the database as unresolved (resolved = 0).
-        # Callers should check get_active_by_title() first to avoid duplicates.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-        INSERT INTO alerts (level, title, message, created_at, resolved, fire_count)
-        VALUES (?, ?, ?, ?, 0, 1)
-        """, (
-            alert.level,
-            alert.title,
-            alert.message,
-            alert.timestamp.isoformat()
-        ))
-
-        conn.commit()
-        conn.close()
+        # INSERT OR IGNORE means if an unresolved alert with the same title already exists
+        # (enforced by the partial unique index), the insert is silently skipped.
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT OR IGNORE INTO alerts (level, title, message, created_at, resolved, fire_count)
+            VALUES (?, ?, ?, ?, 0, 1)
+            """, (
+                alert.level,
+                alert.title,
+                alert.message,
+                alert.timestamp.isoformat()
+            ))
+            conn.commit()
 
     def get_active_by_title(self, title):
         # Returns the ID of the first unresolved alert matching the given title,
         # or None if no such alert exists.
         # Used to prevent inserting duplicate alerts for the same ongoing condition.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-        SELECT id FROM alerts
-        WHERE title = ? AND resolved = 0
-        """, (title,))
-
-        row = cursor.fetchone()
-        conn.close()
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT id FROM alerts
+            WHERE title = ? AND resolved = 0
+            """, (title,))
+            row = cursor.fetchone()
         return row[0] if row else None
 
     def increment_fire_count(self, title):
@@ -143,43 +146,38 @@ class AlertStorage:
         # When fire_count reaches 3 (the condition has persisted across 3 scans / ~9 hours),
         # the alert is automatically escalated from "warning" to "critical".
         # Returns True if the alert was just escalated so the caller can send a desktop notification.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT fire_count, level FROM alerts WHERE title = ? AND resolved = 0",
-            (title,)
-        )
-        row = cursor.fetchone()
-        escalated = False
-
-        if row:
-            new_count = row[0] + 1
-            new_level = "critical" if new_count >= 3 and row[1] == "warning" else row[1]
-            escalated = (new_count == 3 and row[1] == "warning")
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as conn:
+            cursor = conn.cursor()
             cursor.execute(
-                "UPDATE alerts SET fire_count = ?, level = ? WHERE title = ? AND resolved = 0",
-                (new_count, new_level, title)
+                "SELECT fire_count, level FROM alerts WHERE title = ? AND resolved = 0",
+                (title,)
             )
+            row = cursor.fetchone()
+            escalated = False
 
-        conn.commit()
-        conn.close()
+            if row:
+                new_count = row[0] + 1
+                new_level = "critical" if new_count >= 3 and row[1] == "warning" else row[1]
+                escalated = (new_count == 3 and row[1] == "warning")
+                cursor.execute(
+                    "UPDATE alerts SET fire_count = ?, level = ? WHERE title = ? AND resolved = 0",
+                    (new_count, new_level, title)
+                )
+
+            conn.commit()
         return escalated
 
     def resolve_by_title(self, title):
         # Marks all unresolved alerts with the given title as resolved (resolved = 1).
         # Called when an "info" alert arrives, indicating the problem has cleared.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-        UPDATE alerts
-        SET resolved = 1
-        WHERE title = ? AND resolved = 0
-        """, (title,))
-
-        conn.commit()
-        conn.close()
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE alerts
+            SET resolved = 1
+            WHERE title = ? AND resolved = 0
+            """, (title,))
+            conn.commit()
 
     # -------------------------
     # Dashboard Queries
@@ -190,38 +188,32 @@ class AlertStorage:
         # Used by the dashboard to populate the "Active Alerts" panel.
         # Each row is (level, title, message, created_at, fire_count).
         # fire_count >= 3 means the condition has been present for 3+ scans and was escalated.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT level, title, message, created_at, fire_count
-            FROM alerts
-            WHERE resolved = 0
-            ORDER BY created_at DESC
-        """)
-
-        rows = cursor.fetchall()
-        conn.close()
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT level, title, message, created_at, fire_count
+                FROM alerts
+                WHERE resolved = 0
+                ORDER BY created_at DESC
+            """)
+            rows = cursor.fetchall()
         return rows
 
     def get_recent_resolved(self):
         # Returns up to 20 alerts that were resolved within the last 7 days, newest first.
         # Used by the dashboard to populate the "Recently Resolved" panel.
         # Each row is (level, title, message, created_at).
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT level, title, message, created_at
-            FROM alerts
-            WHERE resolved = 1
-            AND datetime(created_at) >= datetime('now','-7 days')
-            ORDER BY created_at DESC
-            LIMIT 20
-        """)
-
-        rows = cursor.fetchall()
-        conn.close()
+        with closing(sqlite3.connect(self.db_path, timeout=5)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT level, title, message, created_at
+                FROM alerts
+                WHERE resolved = 1
+                AND datetime(created_at) >= datetime('now','-7 days')
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            rows = cursor.fetchall()
         return rows
 
 

@@ -25,12 +25,40 @@ import sqlite3
 import re
 import json
 import shutil
+import fcntl
+import sys
 import requests
+from contextlib import closing
 from datetime import datetime
 from ping3 import ping
 from alerts import Alert, AlertEngine, AlertStorage
 
 DB_FILE = "network_history.db"
+LOCK_FILE = "scan.lock"
+
+# -----------------------------
+# Scan lock (prevents concurrent scans)
+# -----------------------------
+
+def acquire_scan_lock():
+    # Acquires an exclusive non-blocking file lock so that only one scan can run at a time.
+    # Returns the open lock file handle on success, or None if another scan is already running.
+    # The caller must call release_scan_lock() when the scan is complete.
+    lf = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lf
+    except OSError:
+        lf.close()
+        return None
+
+
+def release_scan_lock(lf):
+    # Releases the file lock acquired by acquire_scan_lock().
+    if lf:
+        fcntl.flock(lf, fcntl.LOCK_UN)
+        lf.close()
+
 
 # -----------------------------
 # Database setup
@@ -41,73 +69,83 @@ def init_db():
     # Safe to call multiple times — uses CREATE TABLE IF NOT EXISTS.
     # Also migrates older databases that lack the analysis column in summaries.
     # Must be called before any other DB operations (e.g. at the start of a scan).
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS summaries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT,
-            summary TEXT,
-            analysis TEXT DEFAULT ''
-        )
-    """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                summary TEXT,
+                analysis TEXT DEFAULT ''
+            )
+        """)
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS metrics (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT,
-            device_count INTEGER,
-            dup_arp INTEGER,
-            connections INTEGER,
-            bandwidth_today REAL
-        )
-    """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                device_count INTEGER,
+                dup_arp INTEGER,
+                connections INTEGER,
+                bandwidth_today REAL
+            )
+        """)
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS devices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mac_address TEXT UNIQUE NOT NULL,
-            ip_address TEXT,
-            first_seen TEXT,
-            last_seen TEXT
-        )
-    """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mac_address TEXT UNIQUE NOT NULL,
+                ip_address TEXT,
+                first_seen TEXT,
+                last_seen TEXT
+            )
+        """)
 
-    # Migrate older databases that don't have the analysis column yet.
-    # SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS, so we use try/except.
-    try:
-        c.execute("ALTER TABLE summaries ADD COLUMN analysis TEXT DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass  # Column already exists — safe to ignore
+        # Migrate older databases that don't have the analysis column yet.
+        # SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS, so we use try/except.
+        try:
+            c.execute("ALTER TABLE summaries ADD COLUMN analysis TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # Column already exists — safe to ignore
 
-    # Migrate devices table to add label column for known-device tagging.
-    try:
-        c.execute("ALTER TABLE devices ADD COLUMN label TEXT DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass
+        # Migrate devices table to add label column for known-device tagging.
+        try:
+            c.execute("ALTER TABLE devices ADD COLUMN label TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
 
-    # Migrate devices table to track whether a device was seen in the most recent scan.
-    # Defaults to 1 so existing devices don't immediately appear as offline before the
-    # first scan runs after this migration.
-    try:
-        c.execute("ALTER TABLE devices ADD COLUMN is_online INTEGER DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
+        # Migrate devices table to track whether a device was seen in the most recent scan.
+        # Defaults to 1 so existing devices don't immediately appear as offline before the
+        # first scan runs after this migration.
+        try:
+            c.execute("ALTER TABLE devices ADD COLUMN is_online INTEGER DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS pending_actions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            action_type TEXT NOT NULL,
-            params TEXT NOT NULL,
-            display_text TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            status TEXT DEFAULT 'pending'
-        )
-    """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS pending_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action_type TEXT NOT NULL,
+                params TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT DEFAULT 'pending'
+            )
+        """)
 
-    conn.commit()
-    conn.close()
+        # Partial unique index prevents duplicate pending actions atomically.
+        # INSERT OR IGNORE in save_pending_actions() relies on this constraint.
+        try:
+            c.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_active
+                ON pending_actions(action_type, params)
+                WHERE status = 'pending'
+            """)
+        except sqlite3.OperationalError:
+            pass
+
+        conn.commit()
 
 # -----------------------------
 # Save text summary (used by dashboard)
@@ -117,27 +155,23 @@ def save_summary(summary, analysis=""):
     # Inserts a plain-text network summary and optional AI analysis into the summaries table.
     # init_db() must have been called first to ensure the table and analysis column exist.
     # Used by both the CLI scan and the dashboard /run route to persist results.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    c.execute(
-        "INSERT INTO summaries (timestamp, summary, analysis) VALUES (?, ?, ?)",
-        (str(datetime.now()), summary, analysis)
-    )
-
-    conn.commit()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO summaries (timestamp, summary, analysis) VALUES (?, ?, ?)",
+            (str(datetime.now()), summary, analysis)
+        )
+        conn.commit()
 
 
 def load_latest_summary():
     # Returns the most recent (summary, analysis) pair from the summaries table.
     # Used by the dashboard on startup to restore the last scan result without needing a rescan.
     # Returns ("", "") if no summaries have been saved yet.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT summary, analysis FROM summaries ORDER BY id DESC LIMIT 1")
-    row = c.fetchone()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute("SELECT summary, analysis FROM summaries ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
     if row:
         return row[0], row[1] or ""
     return "", ""
@@ -146,14 +180,13 @@ def load_latest_summary():
 def load_scan_history(limit=20):
     # Returns the last `limit` scans as a list of dicts for the dashboard history table.
     # Queries the metrics table directly — no regex parsing of summary text needed.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "SELECT timestamp, device_count, bandwidth_today FROM metrics ORDER BY id DESC LIMIT ?",
-        (limit,)
-    )
-    rows = c.fetchall()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute(
+            "SELECT timestamp, device_count, bandwidth_today FROM metrics ORDER BY id DESC LIMIT ?",
+            (limit,)
+        )
+        rows = c.fetchall()
     return [{"timestamp": ts, "devices": dev, "bandwidth": bw} for ts, dev, bw in rows]
 
 
@@ -161,11 +194,10 @@ def load_recent_summaries(limit=8):
     # Returns the last `limit` (timestamp, summary) pairs in chronological order (oldest first).
     # Passed to ask_ai() as historical context so the AI can spot trends across scans
     # rather than only seeing the current snapshot.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT timestamp, summary FROM summaries ORDER BY id DESC LIMIT ?", (limit,))
-    rows = c.fetchall()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute("SELECT timestamp, summary FROM summaries ORDER BY id DESC LIMIT ?", (limit,))
+        rows = c.fetchall()
     return list(reversed(rows))  # oldest first so the AI reads chronologically
 
 # -----------------------------
@@ -175,14 +207,13 @@ def load_recent_summaries(limit=8):
 def save_metrics(device_count, dup_arp, connections, bandwidth):
     # Inserts a single row of numeric metrics into the metrics table with the current timestamp.
     # Called after every scan so that trend charts in the dashboard have historical data to display.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO metrics VALUES (NULL,?,?,?,?,?)",
-        (str(datetime.now()), device_count, dup_arp, connections, bandwidth)
-    )
-    conn.commit()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO metrics VALUES (NULL,?,?,?,?,?)",
+            (str(datetime.now()), device_count, dup_arp, connections, bandwidth)
+        )
+        conn.commit()
 
 
 def load_recent_metrics(limit=5):
@@ -190,14 +221,13 @@ def load_recent_metrics(limit=5):
     # Each row is a tuple of (device_count, dup_arp, connections, bandwidth_today).
     # Used by detect_changes() to compute rolling averages and by MetricAdapter.get_latest()
     # to confirm that at least one metric row exists before running alert checks.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "SELECT device_count, dup_arp, connections, bandwidth_today FROM metrics ORDER BY id DESC LIMIT ?",
-        (limit,)
-    )
-    rows = c.fetchall()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute(
+            "SELECT device_count, dup_arp, connections, bandwidth_today FROM metrics ORDER BY id DESC LIMIT ?",
+            (limit,)
+        )
+        rows = c.fetchall()
     return rows
 
 # -----------------------------
@@ -237,28 +267,27 @@ def upsert_devices(devices):
     # Returns a list of MAC addresses that were inserted for the first time,
     # so callers can fire "new device" alerts for them.
     now = str(datetime.now())
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
     new_macs = []
-    for mac, ip, vendor in devices:
-        c.execute("SELECT id, label FROM devices WHERE mac_address = ?", (mac,))
-        row = c.fetchone()
-        if row is None:
-            new_macs.append(mac)
-            c.execute(
-                "INSERT INTO devices (mac_address, ip_address, first_seen, last_seen, label) VALUES (?, ?, ?, ?, ?)",
-                (mac, ip, now, now, vendor)
-            )
-        else:
-            # Preserve any label the user has set; fall back to vendor if still blank.
-            current_label = row[1] or ""
-            new_label = current_label if current_label else vendor
-            c.execute(
-                "UPDATE devices SET ip_address = ?, last_seen = ?, label = ? WHERE mac_address = ?",
-                (ip, now, new_label, mac)
-            )
-    conn.commit()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        for mac, ip, vendor in devices:
+            c.execute("SELECT id, label FROM devices WHERE mac_address = ?", (mac,))
+            row = c.fetchone()
+            if row is None:
+                new_macs.append(mac)
+                c.execute(
+                    "INSERT INTO devices (mac_address, ip_address, first_seen, last_seen, label) VALUES (?, ?, ?, ?, ?)",
+                    (mac, ip, now, now, vendor)
+                )
+            else:
+                # Preserve any label the user has set; fall back to vendor if still blank.
+                current_label = row[1] or ""
+                new_label = current_label if current_label else vendor
+                c.execute(
+                    "UPDATE devices SET ip_address = ?, last_seen = ?, label = ? WHERE mac_address = ?",
+                    (ip, now, new_label, mac)
+                )
+        conn.commit()
     return new_macs
 
 
@@ -266,13 +295,12 @@ def load_devices():
     # Returns all known devices ordered by most recently seen first.
     # Each row is (mac_address, ip_address, first_seen, last_seen, label, is_online).
     # Used by the dashboard /devices endpoint to populate the inventory table.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "SELECT mac_address, ip_address, first_seen, last_seen, label, is_online FROM devices ORDER BY last_seen DESC"
-    )
-    rows = c.fetchall()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute(
+            "SELECT mac_address, ip_address, first_seen, last_seen, label, is_online FROM devices ORDER BY last_seen DESC"
+        )
+        rows = c.fetchall()
     return rows
 
 
@@ -282,18 +310,17 @@ def update_device_status(seen_macs):
     # for labelled devices whose online status changed this scan.
     # Only labelled devices trigger alerts — unlabelled ones are expected unknowns.
     seen_set = set(m.lower() for m in seen_macs)
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
 
-    c.execute("SELECT mac_address, label, is_online FROM devices WHERE label != ''")
-    labelled = c.fetchall()  # (mac, label, is_online)
+        c.execute("SELECT mac_address, label, is_online FROM devices WHERE label != ''")
+        labelled = c.fetchall()  # (mac, label, is_online)
 
-    c.execute("UPDATE devices SET is_online = 0")
-    for mac in seen_set:
-        c.execute("UPDATE devices SET is_online = 1 WHERE mac_address = ?", (mac,))
+        c.execute("UPDATE devices SET is_online = 0")
+        for mac in seen_set:
+            c.execute("UPDATE devices SET is_online = 1 WHERE mac_address = ?", (mac,))
 
-    conn.commit()
-    conn.close()
+        conn.commit()
 
     went_offline = [(mac, label) for mac, label, was_online in labelled
                     if was_online == 1 and mac.lower() not in seen_set]
@@ -306,11 +333,10 @@ def set_device_label(mac, label):
     # Saves a human-readable name for a device (e.g. "David's laptop", "Smart TV").
     # Once labelled, the corresponding "New device" alert can be auto-resolved
     # because the device is now acknowledged as known.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("UPDATE devices SET label = ? WHERE mac_address = ?", (label, mac))
-    conn.commit()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute("UPDATE devices SET label = ? WHERE mac_address = ?", (label, mac))
+        conn.commit()
 
 
 # -----------------------------
@@ -320,66 +346,57 @@ def set_device_label(mac, label):
 def save_pending_actions(actions):
     # Inserts a list of AI-suggested actions into the pending_actions table.
     # Each action is a dict with action_type, params (JSON string), and display_text.
-    # Skips duplicates — if a pending action with the same action_type and params already
-    # exists, it is not inserted again (avoids flooding the queue across multiple scans).
+    # Duplicates are silently skipped via INSERT OR IGNORE — the partial unique index
+    # on (action_type, params) WHERE status='pending' enforces this atomically.
     if not actions:
         return
     now = str(datetime.now())
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    for action in actions:
-        c.execute(
-            "SELECT id FROM pending_actions WHERE action_type = ? AND params = ? AND status = 'pending'",
-            (action["action_type"], action["params"])
-        )
-        if not c.fetchone():
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        for action in actions:
             c.execute(
-                "INSERT INTO pending_actions (action_type, params, display_text, created_at, status) VALUES (?, ?, ?, ?, 'pending')",
+                "INSERT OR IGNORE INTO pending_actions (action_type, params, display_text, created_at, status) VALUES (?, ?, ?, ?, 'pending')",
                 (action["action_type"], action["params"], action["display_text"], now)
             )
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
 def load_pending_actions():
     # Returns all actions with status='pending', newest first.
     # Each row is (id, action_type, display_text, created_at).
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "SELECT id, action_type, display_text, created_at FROM pending_actions WHERE status = 'pending' ORDER BY created_at DESC"
-    )
-    rows = c.fetchall()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute(
+            "SELECT id, action_type, display_text, created_at FROM pending_actions WHERE status = 'pending' ORDER BY created_at DESC"
+        )
+        rows = c.fetchall()
     return rows
 
 
 def approve_action(action_id):
     # Executes the action and marks it as approved.
     # Supported action types: label_device, resolve_alert.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT action_type, params FROM pending_actions WHERE id = ?", (action_id,))
-    row = c.fetchone()
-    if row:
-        action_type, params_json = row
-        params = json.loads(params_json)
-        if action_type == "label_device":
-            set_device_label(params["mac"], params["label"])
-        elif action_type == "resolve_alert":
-            AlertStorage().resolve_by_title(params["title"])
-        c.execute("UPDATE pending_actions SET status = 'approved' WHERE id = ?", (action_id,))
-    conn.commit()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute("SELECT action_type, params FROM pending_actions WHERE id = ?", (action_id,))
+        row = c.fetchone()
+        if row:
+            action_type, params_json = row
+            params = json.loads(params_json)
+            if action_type == "label_device":
+                set_device_label(params["mac"], params["label"])
+            elif action_type == "resolve_alert":
+                AlertStorage().resolve_by_title(params["title"])
+            c.execute("UPDATE pending_actions SET status = 'approved' WHERE id = ?", (action_id,))
+        conn.commit()
 
 
 def reject_action(action_id):
     # Marks an action as rejected without executing it.
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("UPDATE pending_actions SET status = 'rejected' WHERE id = ?", (action_id,))
-    conn.commit()
-    conn.close()
+    with closing(sqlite3.connect(DB_FILE, timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute("UPDATE pending_actions SET status = 'rejected' WHERE id = ?", (action_id,))
+        conn.commit()
 
 
 # -----------------------------
@@ -836,7 +853,6 @@ def check_dependencies():
     }
     missing = [f"  {cmd}: {desc}" for cmd, desc in required.items() if not shutil.which(cmd)]
     if missing:
-        import sys
         print("WARNING: the following tools are not on PATH — related metrics will be empty:",
               file=sys.stderr)
         print("\n".join(missing), file=sys.stderr)
@@ -846,35 +862,44 @@ def main():
     # Entry point for running a scan from the command line (called by run_scan.sh).
     # Steps:
     #   1. Ensures the DB schema exists
-    #   2. Collects current network metrics and saves them
-    #   3. Runs alert checks via AlertEngine (pings 8.8.8.8, checks thresholds)
-    #   4. Saves new critical/warning alerts; resolves existing alerts when conditions clear
-    #   5. Prints the plain-text summary to stdout
+    #   2. Acquires an exclusive scan lock — exits immediately if another scan is running
+    #   3. Collects current network metrics and saves them
+    #   4. Runs alert checks via AlertEngine (pings 8.8.8.8, checks thresholds)
+    #   5. Saves new critical/warning alerts; resolves existing alerts when conditions clear
+    #   6. Prints the plain-text summary to stdout
     # Note: the AI analysis step is omitted here — it only runs via the dashboard /run route.
     check_dependencies()
     init_db()
 
-    alert_storage = AlertStorage()
+    lock = acquire_scan_lock()
+    if lock is None:
+        print("Another scan is already running — skipping.", file=sys.stderr)
+        return
 
-    summary, device_count, dup_arp, connections, bandwidth, devices = collect_summary()
-    save_metrics(device_count, dup_arp, connections, bandwidth)
+    try:
+        alert_storage = AlertStorage()
 
-    history_metrics = load_recent_metrics()
-    changes = detect_changes((device_count, dup_arp, connections, bandwidth), history_metrics)
+        summary, device_count, dup_arp, connections, bandwidth, devices = collect_summary()
+        save_metrics(device_count, dup_arp, connections, bandwidth)
 
-    # Build historical summary context for the AI — last 8 scans (up to 24 hours).
-    history_rows = load_recent_summaries()
-    history_text = "\n\n".join(f"[{ts}]\n{s.strip()}" for ts, s in history_rows)
-    raw_analysis = ask_ai(summary + "\nDetected changes:\n" + changes, history_text)
-    analysis, suggestions = parse_ai_suggestions(raw_analysis)
-    save_summary(summary, analysis)
-    save_pending_actions(suggestions)
+        history_metrics = load_recent_metrics()
+        changes = detect_changes((device_count, dup_arp, connections, bandwidth), history_metrics)
 
-    new_macs = upsert_devices(devices)
-    went_offline, came_online = update_device_status([d[0] for d in devices])
-    process_scan_alerts(new_macs, alert_storage, verbose=True,
-                        devices=devices, went_offline=went_offline, came_online=came_online)
-    print(summary)
+        # Build historical summary context for the AI — last 8 scans (up to 24 hours).
+        history_rows = load_recent_summaries()
+        history_text = "\n\n".join(f"[{ts}]\n{s.strip()}" for ts, s in history_rows)
+        raw_analysis = ask_ai(summary + "\nDetected changes:\n" + changes, history_text)
+        analysis, suggestions = parse_ai_suggestions(raw_analysis)
+        save_summary(summary, analysis)
+        save_pending_actions(suggestions)
+
+        new_macs = upsert_devices(devices)
+        went_offline, came_online = update_device_status([d[0] for d in devices])
+        process_scan_alerts(new_macs, alert_storage, verbose=True,
+                            devices=devices, went_offline=went_offline, came_online=came_online)
+        print(summary)
+    finally:
+        release_scan_lock(lock)
 
 
 if __name__ == "__main__":
