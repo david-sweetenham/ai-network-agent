@@ -761,8 +761,10 @@ fetch('/metrics')
     fetch('/devices/' + encodeURIComponent(mac))
       .then(function(r){ return r.json(); })
       .then(function(d){
-        document.getElementById('modal-title').textContent = d.label || mac;
-        document.getElementById('modal-body').innerHTML =
+        var modalTitle = document.getElementById('modal-title');
+        var modalBody  = document.getElementById('modal-body');
+        modalTitle.textContent = d.label || mac;
+        modalBody.innerHTML =
           '<table style="width:100%;font-size:13px;border-collapse:collapse;">' +
           '<tr><td style="padding:6px 0;color:var(--muted);width:90px;">MAC</td><td style="font-family:monospace;">' + esc(d.mac) + '</td></tr>' +
           '<tr><td style="padding:6px 0;color:var(--muted);">IP</td><td style="font-family:monospace;">' + esc(d.ip) + '</td></tr>' +
@@ -771,6 +773,9 @@ fetch('/metrics')
           '<tr><td style="padding:6px 0;color:var(--muted);">Last seen</td><td>' + esc(d.last_seen) + '</td></tr>' +
           '</table>' +
           '<p style="margin-top:14px;font-size:12px;color:var(--muted);">Go to the Devices tab to add a label for this device.</p>';
+        if (localStorage.getItem('demo-mode') === '1') {
+          if (window._demoAnonymise) { window._demoAnonymise(modalTitle); window._demoAnonymise(modalBody); }
+        }
         document.getElementById('device-modal').style.display = 'flex';
       });
   }
@@ -853,6 +858,9 @@ fetch('/metrics')
   document.getElementById('demo-checkbox').addEventListener('change', function(){
     setDemo(this.checked);
   });
+
+  // Expose for external callers (e.g. the device modal)
+  window._demoAnonymise = anonymiseNode;
 
   if (localStorage.getItem(DEMO_KEY) === '1') {
     // Watch the device table so async-rendered content gets anonymised too
