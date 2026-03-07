@@ -264,13 +264,33 @@ class AlertEngine:
         if not latest:
             return alerts
 
-        # Check 1: host reachability — critical if 8.8.8.8 is not responding at all
+        # Check 1a: gateway reachability — critical if the local router doesn't respond
+        # (indicates a LAN problem rather than an ISP problem)
+        if latest.get("gateway_ip"):
+            if not latest.get("gateway_reachable"):
+                if self.can_alert("gateway_down"):
+                    alerts.append(Alert(
+                        level="critical",
+                        title="Gateway unreachable",
+                        message=f"Local gateway ({latest['gateway_ip']}) is not responding — LAN may be down",
+                        timestamp=datetime.utcnow()
+                    ))
+            else:
+                alerts.append(Alert(
+                    level="info",
+                    title="Gateway unreachable",
+                    message="Gateway reachable again",
+                    timestamp=datetime.utcnow()
+                ))
+
+        # Check 1b: internet reachability — critical if 8.8.8.8 is not responding
+        # (gateway is up but ISP connection is down)
         if not latest["host_reachable"]:
             if self.can_alert("host_down"):
                 alerts.append(Alert(
                     level="critical",
                     title="Host unreachable",
-                    message="Internet host not responding",
+                    message="Internet host (8.8.8.8) not responding — ISP connection may be down",
                     timestamp=datetime.utcnow()
                 ))
         else:

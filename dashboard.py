@@ -468,6 +468,10 @@ table.device-table td {
       <pre>{{analysis}}</pre>
     </div>
   </div>
+  <div class="card">
+    <h2>🕐 Scan History</h2>
+    <div id="scan-history-table" style="overflow-x:auto;">Loading...</div>
+  </div>
 </div>
 
 <!-- TAB: Devices -->
@@ -513,12 +517,16 @@ Promise.all([fetch('/devices').then(r => r.json()), fetch('/connections').then(r
         return;
     }
     const conns = connData.connections;
-    let html = '<table class="device-table"><thead><tr><th>Label</th><th>MAC Address</th><th>IP Address</th><th>Active Connections</th><th>First Seen</th><th>Last Seen</th></tr></thead><tbody>';
+    let html = '<table class="device-table"><thead><tr><th style="width:32px;text-align:center;">●</th><th>Label</th><th>MAC Address</th><th>IP Address</th><th>Active Connections</th><th>First Seen</th><th>Last Seen</th></tr></thead><tbody>';
     devData.devices.forEach(d => {
         const unlabelled = !d.label;
         const connCount = conns[d.ip] || 0;
         const connStyle = connCount > 0 ? 'color:#34d399;font-weight:600;' : 'color:#6b7280;';
+        const statusDot = d.online
+            ? '<span style="color:#4ade80;font-size:14px;" title="Online">●</span>'
+            : '<span style="color:#6b7280;font-size:14px;" title="Offline">●</span>';
         html += `<tr>
+            <td style="text-align:center;">${statusDot}</td>
             <td style="font-family:system-ui;">
                 <form method="POST" action="/devices/${d.mac}/label" style="display:flex;gap:6px;align-items:center;">
                     <input type="text" name="label" value="${d.label}" placeholder="Unlabelled"
@@ -529,6 +537,29 @@ Promise.all([fetch('/devices').then(r => r.json()), fetch('/connections').then(r
             <td>${d.mac}</td><td>${d.ip}</td>
             <td style="${connStyle}">${connCount > 0 ? connCount : '—'}</td>
             <td>${d.first_seen}</td><td>${d.last_seen}</td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+});
+</script>
+
+<script>
+// Scan history table
+fetch('/history')
+.then(r => r.json())
+.then(data => {
+    const el = document.getElementById('scan-history-table');
+    if (!data.history.length) {
+        el.innerHTML = '<p style="color:#9ca3af;">No scan history yet.</p>';
+        return;
+    }
+    let html = '<table class="device-table"><thead><tr><th>Timestamp</th><th>Devices</th><th>Bandwidth</th></tr></thead><tbody>';
+    data.history.forEach(h => {
+        html += `<tr>
+            <td>${h.timestamp}</td>
+            <td style="font-family:system-ui;">${h.devices != null ? h.devices : '—'}</td>
+            <td style="font-family:system-ui;">${h.bandwidth != null ? h.bandwidth.toFixed(2) + ' GiB' : '—'}</td>
         </tr>`;
     });
     html += '</tbody></table>';
@@ -936,7 +967,11 @@ def run_scan():
     network_summary.save_pending_actions(suggestions)
 
     new_macs = network_summary.upsert_devices(devices)
-    network_summary.process_scan_alerts(new_macs, alert_storage)
+    went_offline, came_online = network_summary.update_device_status([d[0] for d in devices])
+    network_summary.process_scan_alerts(new_macs, alert_storage,
+                                        devices=devices,
+                                        went_offline=went_offline,
+                                        came_online=came_online)
 
     return redirect(url_for("home"))
 
@@ -963,11 +998,11 @@ def metrics():
 @app.route("/devices")
 def devices_endpoint():
     # Returns the full device inventory as JSON for the dashboard table.
-    # Each entry has mac, ip, first_seen, and last_seen fields.
     rows = network_summary.load_devices()
     return {
         "devices": [
-            {"mac": r[0], "ip": r[1], "first_seen": r[2], "last_seen": r[3], "label": r[4] or ""}
+            {"mac": r[0], "ip": r[1], "first_seen": r[2], "last_seen": r[3],
+             "label": r[4] or "", "online": bool(r[5])}
             for r in rows
         ]
     }
@@ -982,6 +1017,13 @@ def device_detail(mac):
         if r[0].lower() == mac.lower():
             return {"mac": r[0], "ip": r[1], "first_seen": r[2], "last_seen": r[3], "label": r[4] or ""}
     return {"error": "Not found"}, 404
+
+
+@app.route("/history")
+@require_auth
+def history():
+    # Returns the last 20 scans as JSON for the scan history table in the Summary tab.
+    return {"history": network_summary.load_scan_history()}
 
 
 @app.route("/connections")

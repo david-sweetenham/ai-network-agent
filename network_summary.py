@@ -86,6 +86,14 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # Migrate devices table to track whether a device was seen in the most recent scan.
+    # Defaults to 1 so existing devices don't immediately appear as offline before the
+    # first scan runs after this migration.
+    try:
+        c.execute("ALTER TABLE devices ADD COLUMN is_online INTEGER DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS pending_actions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,6 +140,28 @@ def load_latest_summary():
     if row:
         return row[0], row[1] or ""
     return "", ""
+
+
+def load_scan_history(limit=20):
+    # Returns the last `limit` scans as a list of dicts for the dashboard history table.
+    # Parses device count and bandwidth directly from the stored summary text so we don't
+    # need a JOIN against the metrics table (timestamps don't perfectly align).
+    import re as _re
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT timestamp, summary FROM summaries ORDER BY id DESC LIMIT ?", (limit,))
+    rows = c.fetchall()
+    conn.close()
+    result = []
+    for ts, summary in rows:
+        dev_m = _re.search(r'Devices:\s*(\d+)', summary or '')
+        bw_m  = _re.search(r'Bandwidth today:\s*([\d.]+)', summary or '')
+        result.append({
+            "timestamp": ts,
+            "devices":   int(dev_m.group(1))   if dev_m else None,
+            "bandwidth": float(bw_m.group(1))  if bw_m  else None,
+        })
+    return result
 
 
 def load_recent_summaries(limit=8):
@@ -241,16 +271,42 @@ def upsert_devices(devices):
 
 def load_devices():
     # Returns all known devices ordered by most recently seen first.
-    # Each row is (mac_address, ip_address, first_seen, last_seen, label).
+    # Each row is (mac_address, ip_address, first_seen, last_seen, label, is_online).
     # Used by the dashboard /devices endpoint to populate the inventory table.
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute(
-        "SELECT mac_address, ip_address, first_seen, last_seen, label FROM devices ORDER BY last_seen DESC"
+        "SELECT mac_address, ip_address, first_seen, last_seen, label, is_online FROM devices ORDER BY last_seen DESC"
     )
     rows = c.fetchall()
     conn.close()
     return rows
+
+
+def update_device_status(seen_macs):
+    # Marks all devices as offline then marks seen_macs as online.
+    # Returns (went_offline, came_online) — each a list of (mac, label) tuples
+    # for labelled devices whose online status changed this scan.
+    # Only labelled devices trigger alerts — unlabelled ones are expected unknowns.
+    seen_set = set(m.lower() for m in seen_macs)
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+
+    c.execute("SELECT mac_address, label, is_online FROM devices WHERE label != ''")
+    labelled = c.fetchall()  # (mac, label, is_online)
+
+    c.execute("UPDATE devices SET is_online = 0")
+    for mac in seen_set:
+        c.execute("UPDATE devices SET is_online = 1 WHERE mac_address = ?", (mac,))
+
+    conn.commit()
+    conn.close()
+
+    went_offline = [(mac, label) for mac, label, was_online in labelled
+                    if was_online == 1 and mac.lower() not in seen_set]
+    came_online  = [(mac, label) for mac, label, was_online in labelled
+                    if was_online == 0 and mac.lower() in seen_set]
+    return went_offline, came_online
 
 
 def set_device_label(mac, label):
@@ -379,6 +435,29 @@ def detect_changes(current, history):
 # Ping test
 # -----------------------------
 
+def _get_gateway_ip():
+    # Parses the default gateway IP from `ip route show default`.
+    # Returns the gateway IP string, or None if it can't be determined.
+    output = subprocess.getoutput("ip route show default")
+    m = re.search(r'default via (\S+)', output)
+    return m.group(1) if m else None
+
+
+def check_gateway():
+    # Pings the local default gateway once to confirm LAN connectivity.
+    # Returns (gateway_ip, reachable) — gateway_ip is None if no default route found.
+    # A separate check from internet reachability so alerts can distinguish
+    # "LAN is down" (gateway unreachable) from "ISP is down" (gateway up, 8.8.8.8 down).
+    gateway = _get_gateway_ip()
+    if not gateway:
+        return None, False
+    try:
+        result = ping(gateway, timeout=2)
+        return gateway, result is not None
+    except Exception:
+        return gateway, False
+
+
 def check_network_health(host="8.8.8.8", attempts=4):
     # Pings the given host `attempts` times (default: 4 pings to 8.8.8.8) with a 2-second timeout each.
     # Returns a tuple of (reachable, avg_latency_ms, packet_loss_percent).
@@ -421,17 +500,37 @@ class MetricAdapter:
 
         device_count, dup_arp, connections, bandwidth = rows[0]
         reachable, latency, packet_loss = check_network_health()
+        gateway_ip, gateway_reachable = check_gateway()
 
         return {
-            "host_reachable": reachable,
-            "latency_ms": latency,
-            "packet_loss": packet_loss,
+            "host_reachable":    reachable,
+            "latency_ms":        latency,
+            "packet_loss":       packet_loss,
+            "gateway_ip":        gateway_ip,
+            "gateway_reachable": gateway_reachable,
         }
 
 
 # -----------------------------
 # Collect metrics
 # -----------------------------
+
+def get_device_open_ports(ip):
+    # Runs a fast nmap scan (top 100 ports) against a newly discovered device.
+    # Returns a list of (port, service) tuples, e.g. [(22, 'ssh'), (80, 'http')].
+    # Returns an empty list if nmap is not installed, the scan times out, or any error occurs.
+    # nmap is optional — scans still work without it, port info just won't appear in alerts.
+    if not ip:
+        return []
+    try:
+        result = subprocess.run(
+            ["nmap", "-F", "--open", "-T4", ip],
+            capture_output=True, text=True, timeout=30
+        )
+        return [(int(p), s) for p, s in re.findall(r'(\d+)/tcp\s+open\s+(\S+)', result.stdout)]
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        return []
+
 
 def get_connections_by_ip():
     # Parses live ss -tun output to count active TCP/UDP connections per peer IP.
@@ -651,23 +750,49 @@ USER QUESTION: {message}
 # Shared alert processing
 # -----------------------------
 
-def process_scan_alerts(new_macs, alert_storage, verbose=False):
-    # Fires new-device alerts and runs threshold checks after every scan.
-    # Extracted here so both main() and the dashboard /run route use identical logic
-    # rather than maintaining two copies that can silently drift apart.
+def process_scan_alerts(new_macs, alert_storage, verbose=False,
+                        devices=None, went_offline=None, came_online=None):
+    # Fires new-device alerts (with optional port scan detail), device offline/online alerts,
+    # and connectivity threshold checks after every scan.
+    # Extracted here so both main() and the dashboard /run route use identical logic.
     # verbose=True prints status lines to stdout (CLI scan path only).
+    # devices: list of (mac, ip, vendor) tuples from the current scan — used for port scanning.
+    # went_offline: list of (mac, label) for labelled devices not seen this scan.
+    # came_online: list of (mac, label) for labelled devices that reappeared this scan.
+
+    ip_by_mac = {mac.lower(): ip for mac, ip, *_ in (devices or [])}
+
     for mac in new_macs:
-        alert = Alert(
-            level="warning",
-            title=f"New device: {mac}",
-            message=f"Unknown device joined the network (MAC: {mac})",
-            timestamp=datetime.utcnow()
-        )
+        ports = get_device_open_ports(ip_by_mac.get(mac.lower(), ''))
+        port_str = ", ".join(f"{p} ({s})" for p, s in ports[:5]) if ports else ""
+        msg = f"Unknown device joined the network (MAC: {mac})"
+        if port_str:
+            msg += f". Open ports: {port_str}"
+        alert = Alert(level="warning", title=f"New device: {mac}",
+                      message=msg, timestamp=datetime.utcnow())
         if not alert_storage.get_active_by_title(alert.title):
             alert_storage.save(alert)
-            _send_desktop_notification(f"New device: {mac}", "Unknown device joined the network")
+            _send_desktop_notification(f"New device: {mac}", msg)
             if verbose:
                 print(f"NEW DEVICE: {mac}")
+
+    # Alert when a known labelled device disappears from the network
+    for mac, label in (went_offline or []):
+        title = f"Device offline: {label}"
+        if not alert_storage.get_active_by_title(title):
+            alert_storage.save(Alert(
+                level="warning", title=title,
+                message=f"{label} ({mac}) was not seen in the latest scan",
+                timestamp=datetime.utcnow()
+            ))
+            if verbose:
+                print(f"DEVICE OFFLINE: {label} ({mac})")
+
+    # Auto-resolve offline alerts when the device comes back
+    for mac, label in (came_online or []):
+        alert_storage.resolve_by_title(f"Device offline: {label}")
+        if verbose:
+            print(f"DEVICE BACK ONLINE: {label} ({mac})")
 
     metric_adapter = MetricAdapter()
     alert_engine = AlertEngine(metric_adapter, alert_storage)
@@ -724,7 +849,9 @@ def main():
     save_pending_actions(suggestions)
 
     new_macs = upsert_devices(devices)
-    process_scan_alerts(new_macs, alert_storage, verbose=True)
+    went_offline, came_online = update_device_status([d[0] for d in devices])
+    process_scan_alerts(new_macs, alert_storage, verbose=True,
+                        devices=devices, went_offline=went_offline, came_online=came_online)
     print(summary)
 
 
