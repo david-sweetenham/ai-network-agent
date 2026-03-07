@@ -844,11 +844,26 @@ fetch('/metrics')
     }
   }
 
+  // Watch the device table so async-rendered or refreshed content gets anonymised.
+  // Stored outside setDemo so we only create one observer instance.
+  var _observer = null;
+
+  function ensureObserver() {
+    if (_observer) return;
+    _observer = new MutationObserver(function(muts){
+      muts.forEach(function(m){
+        m.addedNodes.forEach(function(n){ anonymiseNode(n); });
+      });
+    });
+    _observer.observe(document.getElementById('device-table'), { childList: true, subtree: true });
+  }
+
   function setDemo(on) {
     document.getElementById('demo-banner').style.display = on ? 'block' : 'none';
     document.getElementById('demo-checkbox').checked = on;
     localStorage.setItem(DEMO_KEY, on ? '1' : '0');
     if (on) {
+      ensureObserver();
       anonymiseNode(document.body);
     } else {
       location.reload();
@@ -863,13 +878,6 @@ fetch('/metrics')
   window._demoAnonymise = anonymiseNode;
 
   if (localStorage.getItem(DEMO_KEY) === '1') {
-    // Watch the device table so async-rendered content gets anonymised too
-    var observer = new MutationObserver(function(muts){
-      muts.forEach(function(m){
-        m.addedNodes.forEach(function(n){ anonymiseNode(n); });
-      });
-    });
-    observer.observe(document.getElementById('device-table'), { childList: true, subtree: true });
     setDemo(true);
   }
 })();
