@@ -21,7 +21,8 @@ A self-hosted home network monitoring agent with an AI-powered web dashboard. Sc
 - Suggested starter questions so you know what to ask
 
 **Alerting**
-- Threshold-based alerts: high latency (>80ms), packet loss (>5%), host unreachable, duplicate ARP, new unknown devices
+- Threshold-based alerts: high latency (>80ms), packet loss (>5%), host unreachable, gateway unreachable, duplicate ARP, new unknown devices, labelled device offline
+- Gateway ping distinguishes LAN outages (router down) from ISP outages (internet down)
 - Alerts categorised by type with colour-coded badges (New Device, Packet Loss, Unreachable, Duplicate ARP, High Latency)
 - Alert escalation tracking — fires again if a condition persists
 - Auto-resolve when a condition clears
@@ -31,6 +32,8 @@ A self-hosted home network monitoring agent with an AI-powered web dashboard. Sc
 **Device Inventory**
 - Tracks every MAC address ever seen, with first/last seen timestamps
 - Assign human-readable labels to devices (e.g. "David's laptop", "Smart TV")
+- Per-device online/offline status — green/grey dot updated every scan; alerts fire when a labelled device disappears and auto-resolve when it returns
+- New device alerts include open ports (via optional `nmap` fast scan)
 - Click any "New device" alert to see device details in a modal
 - Unlabelled devices are visually flagged in the table
 
@@ -40,6 +43,7 @@ A self-hosted home network monitoring agent with an AI-powered web dashboard. Sc
 - Dark and light theme with toggle (preference saved to localStorage)
 - **Demo Mode** — anonymises all real MAC addresses and IP addresses with consistent fake values throughout the entire dashboard; useful for screenshots and sharing without exposing private network data. Toggle persists across sessions.
 - Collapsible cards (state saved to localStorage)
+- Scan history table showing the last 20 scans with device count and bandwidth (Summary tab)
 - Trend charts for bandwidth, device count, and duplicate ARP events (Chart.js)
 - CSV export endpoints for metrics, devices, and alerts — compatible with Power BI and Databricks
 
@@ -58,7 +62,7 @@ A self-hosted home network monitoring agent with an AI-powered web dashboard. Sc
 
 ![Overview tab](DemoScreenshots/001.jpeg)
 
-**Summary** — latest scan metrics and plain-English AI analysis
+**Summary** — latest scan metrics, plain-English AI analysis, and scan history (last 20 scans with device count and bandwidth)
 
 ![Summary tab](DemoScreenshots/002.jpeg)
 
