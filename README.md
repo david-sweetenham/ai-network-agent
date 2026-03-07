@@ -112,9 +112,9 @@ Ollama must be running (`ollama serve` or via systemd) before starting a scan. I
 ### Python packages
 
 ```
-flask>=3.0
-ping3>=4.0
-requests>=2.28
+Flask==3.1.3
+ping3==5.1.5
+requests==2.32.5
 ```
 
 These are installed automatically in the venv during setup.
@@ -144,12 +144,14 @@ chmod +x run_scan.sh start_dashboard.sh
 > [!CAUTION]
 > **Do this before running the dashboard.** The default credentials are `admin` / `changeme` and are public knowledge because this is an open-source repository. Anyone on your network can log in with those credentials until you change them.
 
-Edit [dashboard.py](dashboard.py) and update these two lines near the top:
+Create a `.env` file in the project root (it is gitignored and never committed):
 
-```python
-DASHBOARD_USER = "admin"
-DASHBOARD_PASS = "changeme"   # <-- change this
+```bash
+DASHBOARD_USER=admin
+DASHBOARD_PASS=your-strong-password-here
 ```
+
+`start_dashboard.sh` loads this file automatically on startup. You can also set `FLASK_DEBUG=1` here to enable Flask debug mode (off by default).
 
 The Flask dev server does not support HTTPS. Do not expose port 5000 to the internet — keep it behind your router/firewall and treat it as a LAN-only tool.
 
@@ -242,10 +244,17 @@ crontab -e
 > [!CAUTION]
 > Change the default credentials before starting the container. See the [credentials warning](#change-the-default-credentials) above.
 
-Edit `dashboard.py` to update `DASHBOARD_USER` and `DASHBOARD_PASS`, then rebuild:
+Create a `.env` file in the project root before building:
 
 ```bash
-docker-compose up -d --build
+DASHBOARD_USER=admin
+DASHBOARD_PASS=your-strong-password-here
+```
+
+Then start (or rebuild) the container:
+
+```bash
+docker-compose up -d
 ```
 
 ### Why `network_mode: host`?
@@ -341,4 +350,4 @@ MIT — see [LICENSE](LICENSE).
 
 - `arp-scan` requires root or `CAP_NET_RAW`. If you run into permission errors, either run as root or set the capability: `sudo setcap cap_net_raw+ep $(which arp-scan)`
 - `vnstat` must have been collecting data for at least one monitoring period before bandwidth figures appear
-- The Flask server runs in debug mode (`debug=True`) which is fine for a home network tool but should not be exposed to the internet
+- The Flask server runs with debug mode **off** by default. Set `FLASK_DEBUG=1` in your `.env` file to enable it (useful during development, but never expose a debug server to the internet)
