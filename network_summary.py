@@ -144,24 +144,16 @@ def load_latest_summary():
 
 def load_scan_history(limit=20):
     # Returns the last `limit` scans as a list of dicts for the dashboard history table.
-    # Parses device count and bandwidth directly from the stored summary text so we don't
-    # need a JOIN against the metrics table (timestamps don't perfectly align).
-    import re as _re
+    # Queries the metrics table directly — no regex parsing of summary text needed.
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT timestamp, summary FROM summaries ORDER BY id DESC LIMIT ?", (limit,))
+    c.execute(
+        "SELECT timestamp, device_count, bandwidth_today FROM metrics ORDER BY id DESC LIMIT ?",
+        (limit,)
+    )
     rows = c.fetchall()
     conn.close()
-    result = []
-    for ts, summary in rows:
-        dev_m = _re.search(r'Devices:\s*(\d+)', summary or '')
-        bw_m  = _re.search(r'Bandwidth today:\s*([\d.]+)', summary or '')
-        result.append({
-            "timestamp": ts,
-            "devices":   int(dev_m.group(1))   if dev_m else None,
-            "bandwidth": float(bw_m.group(1))  if bw_m  else None,
-        })
-    return result
+    return [{"timestamp": ts, "devices": dev, "bandwidth": bw} for ts, dev, bw in rows]
 
 
 def load_recent_summaries(limit=8):
@@ -437,9 +429,11 @@ def detect_changes(current, history):
 
 def _get_gateway_ip():
     # Parses the default gateway IP from `ip route show default`.
-    # Returns the gateway IP string, or None if it can't be determined.
-    output = subprocess.getoutput("ip route show default")
-    m = re.search(r'default via (\S+)', output)
+    # Returns the gateway IP string, or None if the command fails or no route is found.
+    result = subprocess.run(["ip", "route", "show", "default"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    m = re.search(r'default via (\S+)', result.stdout)
     return m.group(1) if m else None
 
 
@@ -538,9 +532,10 @@ def get_connections_by_ip():
     # Returns a dict mapping IP -> connection count, e.g. {"192.168.1.5": 3}.
     # This shows which local devices are actively communicating with this machine
     # without requiring gateway/router access.
-    conn_raw = subprocess.getoutput("ss -tun | tail -n +2")
+    result = subprocess.run(["ss", "-tun"], capture_output=True, text=True)
+    lines = result.stdout.split("\n")[1:] if result.returncode == 0 else []
     counts = {}
-    for line in conn_raw.split("\n"):
+    for line in lines:
         parts = line.split()
         if len(parts) < 5:
             continue
@@ -564,9 +559,15 @@ def collect_summary():
     #   - ss -tun: lists active TCP/UDP connections; counts non-header lines
     # Returns a tuple of (summary_text, device_count, dup_count, connection_count, bandwidth_today).
     # The summary_text is a formatted string used for display and AI input.
-    vnstat_raw = subprocess.getoutput("vnstat")
-    arp_raw = subprocess.getoutput("arp-scan --localnet")
-    conn_raw = subprocess.getoutput("ss -tun | tail -n +2")
+    vnstat_result = subprocess.run(["vnstat"], capture_output=True, text=True)
+    vnstat_raw = vnstat_result.stdout if vnstat_result.returncode == 0 else ""
+
+    arp_result = subprocess.run(["arp-scan", "--localnet"], capture_output=True, text=True)
+    arp_raw = arp_result.stdout if arp_result.returncode == 0 else ""
+
+    ss_result = subprocess.run(["ss", "-tun"], capture_output=True, text=True)
+    # Split and skip the header line (equivalent to tail -n +2)
+    conn_raw = "\n".join(ss_result.stdout.split("\n")[1:]) if ss_result.returncode == 0 else ""
 
     # Count only lines matching the arp-scan data format (IP + TAB + MAC) to avoid
     # accidentally counting error messages or header/footer lines that contain "192.168".
