@@ -1161,6 +1161,7 @@ def export_alerts():
 # Start the Flask development server when dashboard.py is run directly.
 # The __main__ guard prevents the server starting if dashboard is ever imported
 # by another module (e.g. tests, or a future WSGI entry point).
-# debug=True enables auto-reload on code changes and shows full tracebacks in the browser.
+# Set FLASK_DEBUG=1 in .env to enable debug mode (auto-reload + full tracebacks).
+# Defaults to off so it is safe to run without .env.
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", debug=True)
+    app.run(host="0.0.0.0", debug=os.environ.get("FLASK_DEBUG", "0") == "1")

@@ -534,7 +534,7 @@ def get_device_open_ports(ip):
 
 def get_connections_by_ip():
     # Parses live ss -tun output to count active TCP/UDP connections per peer IP.
-    # Only counts peers in the 192.168.x.x range (local network devices).
+    # Only counts peers in RFC1918 ranges (10.x, 192.168.x, 172.16-31.x).
     # Returns a dict mapping IP -> connection count, e.g. {"192.168.1.5": 3}.
     # This shows which local devices are actively communicating with this machine
     # without requiring gateway/router access.
@@ -552,7 +552,8 @@ def get_connections_by_ip():
             ip = peer.rsplit(":", 1)[0]
         else:
             continue
-        if ip.startswith("192.168."):
+        if (ip.startswith("192.168.") or ip.startswith("10.") or
+                re.match(r'^172\.(1[6-9]|2\d|3[01])\.', ip)):
             counts[ip] = counts.get(ip, 0) + 1
     return counts
 

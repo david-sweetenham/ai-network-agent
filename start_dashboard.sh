@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/david/ai-network-agent
+cd "$(dirname "$0")"
 source venv/bin/activate
 
 # Load credentials from .env if it exists
