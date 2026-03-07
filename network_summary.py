@@ -27,6 +27,7 @@ import json
 import shutil
 import fcntl
 import sys
+import logging
 import requests
 from contextlib import closing
 from datetime import datetime
@@ -34,6 +35,7 @@ from ping3 import ping
 from alerts import Alert, AlertEngine, AlertStorage
 
 DB_FILE = "network_history.db"
+logger = logging.getLogger(__name__)
 LOCK_FILE = "scan.lock"
 
 # -----------------------------
@@ -771,12 +773,11 @@ USER QUESTION: {message}
 # Shared alert processing
 # -----------------------------
 
-def process_scan_alerts(new_macs, alert_storage, verbose=False,
+def process_scan_alerts(new_macs, alert_storage,
                         devices=None, went_offline=None, came_online=None):
     # Fires new-device alerts (with optional port scan detail), device offline/online alerts,
     # and connectivity threshold checks after every scan.
     # Extracted here so both main() and the dashboard /run route use identical logic.
-    # verbose=True prints status lines to stdout (CLI scan path only).
     # devices: list of (mac, ip, vendor) tuples from the current scan — used for port scanning.
     # went_offline: list of (mac, label) for labelled devices not seen this scan.
     # came_online: list of (mac, label) for labelled devices that reappeared this scan.
@@ -794,8 +795,7 @@ def process_scan_alerts(new_macs, alert_storage, verbose=False,
         if not alert_storage.get_active_by_title(alert.title):
             alert_storage.save(alert)
             _send_desktop_notification(f"New device: {mac}", msg)
-            if verbose:
-                print(f"NEW DEVICE: {mac}")
+            logger.info("NEW DEVICE: %s", mac)
 
     # Alert when a known labelled device disappears from the network
     for mac, label in (went_offline or []):
@@ -806,14 +806,12 @@ def process_scan_alerts(new_macs, alert_storage, verbose=False,
                 message=f"{label} ({mac}) was not seen in the latest scan",
                 timestamp=datetime.utcnow()
             ))
-            if verbose:
-                print(f"DEVICE OFFLINE: {label} ({mac})")
+            logger.info("DEVICE OFFLINE: %s (%s)", label, mac)
 
     # Auto-resolve offline alerts when the device comes back
     for mac, label in (came_online or []):
         alert_storage.resolve_by_title(f"Device offline: {label}")
-        if verbose:
-            print(f"DEVICE BACK ONLINE: {label} ({mac})")
+        logger.info("DEVICE BACK ONLINE: %s (%s)", label, mac)
 
     metric_adapter = MetricAdapter()
     alert_engine = AlertEngine(metric_adapter, alert_storage)
@@ -824,18 +822,15 @@ def process_scan_alerts(new_macs, alert_storage, verbose=False,
                 alert_storage.save(alert)
                 if alert.level == "critical":
                     _send_desktop_notification(alert.title, alert.message)
-                if verbose:
-                    print(f"NEW ALERT: {alert.title}")
+                logger.info("NEW ALERT: %s", alert.title)
             else:
                 escalated = alert_storage.increment_fire_count(alert.title)
                 if escalated:
                     _send_desktop_notification(alert.title, f"Escalated to critical: {alert.message}")
-                    if verbose:
-                        print(f"ESCALATED: {alert.title}")
+                    logger.info("ESCALATED: %s", alert.title)
         elif alert.level == "info" and existing:
             alert_storage.resolve_by_title(alert.title)
-            if verbose:
-                print(f"RESOLVED: {alert.title}")
+            logger.info("RESOLVED: %s", alert.title)
 
 
 # -----------------------------
@@ -843,7 +838,7 @@ def process_scan_alerts(new_macs, alert_storage, verbose=False,
 # -----------------------------
 
 def check_dependencies():
-    # Checks that required system tools are on PATH and warns to stderr if any are missing.
+    # Checks that required system tools are on PATH and warns if any are missing.
     # Missing tools don't abort the scan — they produce empty output and zero counts instead.
     required = {
         "arp-scan": "LAN device discovery (sudo setcap cap_net_raw+ep $(which arp-scan) if needed)",
@@ -853,27 +848,32 @@ def check_dependencies():
     }
     missing = [f"  {cmd}: {desc}" for cmd, desc in required.items() if not shutil.which(cmd)]
     if missing:
-        print("WARNING: the following tools are not on PATH — related metrics will be empty:",
-              file=sys.stderr)
-        print("\n".join(missing), file=sys.stderr)
+        logger.warning("The following tools are not on PATH — related metrics will be empty:\n%s",
+                       "\n".join(missing))
 
 
 def main():
     # Entry point for running a scan from the command line (called by run_scan.sh).
     # Steps:
-    #   1. Ensures the DB schema exists
-    #   2. Acquires an exclusive scan lock — exits immediately if another scan is running
-    #   3. Collects current network metrics and saves them
-    #   4. Runs alert checks via AlertEngine (pings 8.8.8.8, checks thresholds)
-    #   5. Saves new critical/warning alerts; resolves existing alerts when conditions clear
-    #   6. Prints the plain-text summary to stdout
-    # Note: the AI analysis step is omitted here — it only runs via the dashboard /run route.
+    #   1. Configures logging to stdout with timestamps at INFO level
+    #   2. Ensures the DB schema exists
+    #   3. Acquires an exclusive scan lock — exits immediately if another scan is running
+    #   4. Collects current network metrics and saves them
+    #   5. Runs alert checks via AlertEngine (pings 8.8.8.8, checks thresholds)
+    #   6. Saves new critical/warning alerts; resolves existing alerts when conditions clear
+    #   7. Prints the plain-text summary to stdout for cron log capture
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
     check_dependencies()
     init_db()
 
     lock = acquire_scan_lock()
     if lock is None:
-        print("Another scan is already running — skipping.", file=sys.stderr)
+        logger.warning("Another scan is already running — skipping.")
         return
 
     try:
@@ -895,7 +895,7 @@ def main():
 
         new_macs = upsert_devices(devices)
         went_offline, came_online = update_device_status([d[0] for d in devices])
-        process_scan_alerts(new_macs, alert_storage, verbose=True,
+        process_scan_alerts(new_macs, alert_storage,
                             devices=devices, went_offline=went_offline, came_online=came_online)
         print(summary)
     finally:

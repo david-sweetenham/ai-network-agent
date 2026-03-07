@@ -518,7 +518,10 @@ function esc(s) {
 }
 
 // Device table
-Promise.all([fetch('/devices').then(r => r.json()), fetch('/connections').then(r => r.json())])
+Promise.all([
+    fetch('/devices').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+    fetch('/connections').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+])
 .then(([devData, connData]) => {
     const el = document.getElementById('device-table');
     if (!devData.devices.length) {
@@ -550,13 +553,16 @@ Promise.all([fetch('/devices').then(r => r.json()), fetch('/connections').then(r
     });
     html += '</tbody></table>';
     el.innerHTML = html;
+})
+.catch(function() {
+    document.getElementById('device-table').innerHTML = '<p style="color:#f87171;">Failed to load device data — refresh to try again.</p>';
 });
 </script>
 
 <script>
 // Scan history table
 fetch('/history')
-.then(r => r.json())
+.then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
 .then(data => {
     const el = document.getElementById('scan-history-table');
     if (!data.history.length) {
@@ -573,6 +579,9 @@ fetch('/history')
     });
     html += '</tbody></table>';
     el.innerHTML = html;
+})
+.catch(function() {
+    document.getElementById('scan-history-table').innerHTML = '<p style="color:#f87171;">Failed to load scan history — refresh to try again.</p>';
 });
 </script>
 
@@ -580,7 +589,7 @@ fetch('/history')
 // Charts — store instances so we can resize when the tab becomes visible
 var _charts = [];
 fetch('/metrics')
-.then(res => res.json())
+.then(res => { if (!res.ok) throw new Error(res.status); return res.json(); })
 .then(data => {
     const opts = {
         responsive: true,
@@ -602,6 +611,11 @@ fetch('/metrics')
         data:{ labels:data.timestamps, datasets:[{ label:'Duplicate ARP', data:data.dup_arp, borderColor:'red', tension:0.2 }]},
         options:opts
     }));
+})
+.catch(function() {
+    document.querySelectorAll('#tab-trends canvas').forEach(function(c){
+        c.parentElement.innerHTML += '<p style="color:#f87171;font-size:12px;">Failed to load chart data.</p>';
+    });
 });
 </script>
 
@@ -759,7 +773,7 @@ fetch('/metrics')
 (function(){
   function openModal(mac) {
     fetch('/devices/' + encodeURIComponent(mac))
-      .then(function(r){ return r.json(); })
+      .then(function(r){ if (!r.ok) throw new Error(r.status); return r.json(); })
       .then(function(d){
         var modalTitle = document.getElementById('modal-title');
         var modalBody  = document.getElementById('modal-body');
@@ -776,6 +790,10 @@ fetch('/metrics')
         if (localStorage.getItem('demo-mode') === '1') {
           if (window._demoAnonymise) { window._demoAnonymise(modalTitle); window._demoAnonymise(modalBody); }
         }
+        document.getElementById('device-modal').style.display = 'flex';
+      })
+      .catch(function() {
+        document.getElementById('modal-body').innerHTML = '<p style="color:#f87171;">Could not load device details.</p>';
         document.getElementById('device-modal').style.display = 'flex';
       });
   }
@@ -887,11 +905,7 @@ fetch('/metrics')
 </html>
 """
 
-# Load the most recent scan results from the database on startup.
-# Previously these were plain empty strings, so the dashboard always showed blank panels
-# after a Flask restart even though scan results were persisted in the DB.
 network_summary.init_db()
-latest_summary, latest_analysis = network_summary.load_latest_summary()
 
 
 def _scan_times():
@@ -934,18 +948,17 @@ def _scan_times():
 @require_auth
 def home():
     # Renders the main dashboard page.
-    # Reads active and recently resolved alerts fresh from the DB on every request
-    # so the alert panels always reflect current state without needing a rescan.
-    # Summary and analysis come from in-memory globals — they only update on /run.
+    # Reads all data fresh from the DB on every request — no in-memory globals needed.
     active_alerts = alert_storage.get_active_alerts()
     recent_alerts = alert_storage.get_recent_resolved()
     pending_actions = network_summary.load_pending_actions()
     last_scan_ago, next_scan_iso = _scan_times()
+    summary, analysis = network_summary.load_latest_summary()
 
     return render_template_string(
         TEMPLATE,
-        summary=latest_summary,
-        analysis=latest_analysis,
+        summary=summary,
+        analysis=analysis,
         active_alerts=active_alerts,
         recent_alerts=recent_alerts,
         pending_actions=pending_actions,
@@ -964,10 +977,7 @@ def run_scan():
     #   4. Compares to recent history to detect anomalies
     #   5. Sends summary + anomalies to Ollama (mistral) for AI analysis
     #   6. Saves metrics and summary to the DB
-    #   7. Updates the in-memory globals so the dashboard shows fresh data
-    #   8. Redirects back to / so the user sees the updated dashboard
-    global latest_summary, latest_analysis
-
+    #   7. Redirects back to / — home() reads fresh data from DB on every request
     network_summary.init_db()
 
     lock = network_summary.acquire_scan_lock()
@@ -983,18 +993,16 @@ def run_scan():
             history_metrics
         )
 
-        latest_summary = today_summary
-
         # Pass last 8 summaries as historical context so the AI can spot trends.
         history_rows = network_summary.load_recent_summaries()
         history_text = "\n\n".join(f"[{ts}]\n{s.strip()}" for ts, s in history_rows)
         raw_analysis = network_summary.ask_ai(
             today_summary + "\nDetected changes:\n" + changes, history_text
         )
-        latest_analysis, suggestions = network_summary.parse_ai_suggestions(raw_analysis)
+        analysis, suggestions = network_summary.parse_ai_suggestions(raw_analysis)
 
         network_summary.save_metrics(device_count, dup_arp, connections, bandwidth)
-        network_summary.save_summary(today_summary, latest_analysis)
+        network_summary.save_summary(today_summary, analysis)
         network_summary.save_pending_actions(suggestions)
 
         new_macs = network_summary.upsert_devices(devices)
@@ -1093,7 +1101,8 @@ def chat():
     message = data.get("message", "").strip()
     if not message:
         return {"reply": "Please enter a message."}, 400
-    context = f"Latest network summary:\n{latest_summary}\n\nLatest AI analysis:\n{latest_analysis}"
+    summary, analysis = network_summary.load_latest_summary()
+    context = f"Latest network summary:\n{summary}\n\nLatest AI analysis:\n{analysis}"
     reply = network_summary.ask_ai_chat(message, context)
     return {"reply": reply}
 
