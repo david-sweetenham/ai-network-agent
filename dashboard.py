@@ -5,6 +5,7 @@ import csv
 import io
 import functools
 import os
+from contextlib import closing
 from alerts import AlertStorage
 from datetime import datetime
 
@@ -282,6 +283,11 @@ table.device-table td {
 .toggle-switch input:checked + .toggle-track::before { transform:translateX(20px); }
 #demo-checkbox:checked + .toggle-track { background:#f59e0b; }
 
+/* Daily bandwidth filter buttons */
+.bw-filter-btn { background:var(--item-bg); color:var(--muted); border:1px solid var(--border); }
+.bw-filter-btn:hover { background:var(--border); color:var(--text); }
+.bw-filter-btn.active { background:#6366f1; color:#fff; border-color:#6366f1; }
+
 /* Button bar */
 .btn-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
 .btn-bar a, .btn-bar button { margin:0; }
@@ -488,9 +494,20 @@ table.device-table td {
 <!-- TAB: Trends -->
 <div class="tab-panel" id="tab-trends">
   <div class="charts">
-    <div class="card"><h3>📈 Bandwidth</h3><canvas id="bandwidthChart"></canvas></div>
+    <div class="card"><h3>📈 Bandwidth (per scan)</h3><canvas id="bandwidthChart"></canvas></div>
     <div class="card"><h3>🖥 Devices</h3><canvas id="deviceChart"></canvas></div>
     <div class="card"><h3>🔁 Duplicate ARP</h3><canvas id="arpChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>📅 Daily Bandwidth Total</h3>
+    <div style="display:flex;gap:6px;margin-bottom:14px;" id="bw-filters">
+      <button class="bw-filter-btn active" data-days="7"  style="padding:5px 14px;font-size:12px;margin:0;">Week</button>
+      <button class="bw-filter-btn"        data-days="30" style="padding:5px 14px;font-size:12px;margin:0;">Month</button>
+      <button class="bw-filter-btn"        data-days="365" style="padding:5px 14px;font-size:12px;margin:0;">Year</button>
+      <button class="bw-filter-btn"        data-days="0"  style="padding:5px 14px;font-size:12px;margin:0;">All</button>
+    </div>
+    <div style="height:260px;position:relative;"><canvas id="dailyBwChart"></canvas></div>
+    <p id="daily-bw-total" style="margin:10px 0 0;font-size:13px;color:var(--muted);text-align:right;"></p>
   </div>
 </div>
 
@@ -618,6 +635,77 @@ fetch('/metrics')
         c.parentElement.innerHTML += '<p style="color:#f87171;font-size:12px;">Failed to load chart data.</p>';
     });
 });
+</script>
+
+<script>
+// Daily bandwidth chart with Week / Month / Year / All filter
+(function(){
+  var _allDates = [], _allValues = [], _dailyChart = null;
+
+  function renderDailyChart(days) {
+    var dates, values;
+    if (days === 0 || _allDates.length <= days) {
+      dates = _allDates;
+      values = _allValues;
+    } else {
+      dates  = _allDates.slice(-days);
+      values = _allValues.slice(-days);
+    }
+
+    var total = values.reduce(function(s, v){ return s + (v || 0); }, 0);
+    var label = days === 7 ? 'this week' : days === 30 ? 'this month' : days === 365 ? 'this year' : 'all time';
+    document.getElementById('daily-bw-total').textContent =
+      'Total ' + label + ': ' + total.toFixed(2) + ' GiB';
+
+    if (_dailyChart) {
+      _dailyChart.data.labels   = dates;
+      _dailyChart.data.datasets[0].data = values;
+      _dailyChart.update();
+    } else {
+      _dailyChart = new Chart(document.getElementById('dailyBwChart'), {
+        type: 'bar',
+        data: {
+          labels: dates,
+          datasets: [{
+            label: 'Bandwidth (GiB)',
+            data: values,
+            backgroundColor: 'rgba(99,102,241,0.6)',
+            borderColor: '#6366f1',
+            borderWidth: 1,
+            borderRadius: 3
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, ticks: { callback: function(v){ return v + ' GiB'; } } } }
+        }
+      });
+      _charts.push(_dailyChart);
+    }
+  }
+
+  fetch('/bandwidth/daily')
+  .then(function(r){ if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(function(data){
+    _allDates  = data.dates;
+    _allValues = data.bandwidth;
+    renderDailyChart(7);
+
+    document.querySelectorAll('.bw-filter-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        document.querySelectorAll('.bw-filter-btn').forEach(function(b){ b.classList.remove('active'); });
+        btn.classList.add('active');
+        renderDailyChart(parseInt(btn.dataset.days, 10));
+      });
+    });
+  })
+  .catch(function(){
+    document.getElementById('dailyBwChart').parentElement.innerHTML =
+      '<p style="color:#f87171;font-size:12px;">Failed to load daily bandwidth data.</p>';
+  });
+})();
 </script>
 
 
@@ -1068,6 +1156,24 @@ def device_detail(mac):
 def history():
     # Returns the last 20 scans as JSON for the scan history table in the Summary tab.
     return {"history": network_summary.load_scan_history()}
+
+
+@app.route("/bandwidth/daily")
+@require_auth
+def bandwidth_daily():
+    # Returns one row per calendar day: the MAX(bandwidth_today) for that day.
+    # MAX gives the last reading of the day, which is the closest approximation to
+    # the true daily total (vnstat resets bandwidth_today to 0 at midnight).
+    with closing(sqlite3.connect("network_history.db", timeout=5)) as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT date(timestamp), MAX(bandwidth_today)
+            FROM metrics
+            GROUP BY date(timestamp)
+            ORDER BY date(timestamp) ASC
+        """)
+        rows = c.fetchall()
+    return {"dates": [r[0] for r in rows], "bandwidth": [r[1] for r in rows]}
 
 
 @app.route("/connections")
