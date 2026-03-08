@@ -44,7 +44,8 @@ A self-hosted home network monitoring agent with an AI-powered web dashboard. Sc
 - **Demo Mode** — anonymises all real MAC addresses and IP addresses with consistent fake values throughout the entire dashboard; useful for screenshots and sharing without exposing private network data. Toggle persists across sessions.
 - Collapsible cards (state saved to localStorage)
 - Scan history table showing the last 20 scans with device count and bandwidth (Summary tab)
-- Trend charts for bandwidth, device count, and duplicate ARP events (Chart.js)
+- Trend charts for bandwidth (per scan), device count, and duplicate ARP events (Chart.js)
+- **Daily bandwidth history** — bar chart showing true daily totals with Week / Month / Year / All filter; period total shown below the chart
 - CSV export endpoints for metrics, devices, and alerts — compatible with Power BI and Databricks
 
 **Security**
